@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WoofBot.Core/WoofBot.Core.csproj" />
+    <Project Path="src/WoofBot.Sdk/WoofBot.Sdk.csproj" />
+  </Folder>
+  <Folder Name="/src/adapters/">
+    <Project Path="src/adapters/WoofBot.Adapters.OneBot/WoofBot.Adapters.OneBot.csproj" />
+  </Folder>
+</Solution>
