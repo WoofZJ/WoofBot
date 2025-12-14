@@ -1,3 +1,4 @@
+using WoofBot.Sdk.Models;
 using WoofModels = WoofBot.Sdk.Models;
 
 namespace WoofBot.Adapters.OneBot.Models.Messages;
@@ -11,22 +12,21 @@ public static class MsgHelper
             WoofModels.Messages messages = [];
             foreach (var segment in msgChain)
             {
-                switch (segment)
+                messages.Add(segment switch
                 {
-                    case PlainText textSegment:
-                        messages.Add(new WoofModels.Text(textSegment.Text));
-                        break;
-                    case ImageRecv imageRecvSegment:
-                        messages.Add(new WoofModels.ImageRecv(
-                            imageRecvSegment.File, imageRecvSegment.Url, imageRecvSegment.FileSize));
-                        break;
-                    case At atSegment:
-                        messages.Add(new WoofModels.At(atSegment.Qq.ToString()));
-                        break;
-                    case AtAll:
-                        messages.Add(new WoofModels.At("all"));
-                        break;
-                }
+                    PlainText text =>
+                        new WoofModels.Text(text.Text),
+                    ImageRecv image =>
+                        new WoofModels.ImageRecv(image.File, image.Url, image.FileSize),
+                    At at =>
+                        new WoofModels.At(at.Qq.ToString()),
+                    AtAll =>
+                        new WoofModels.At("all"),
+                    Reply reply =>
+                        new WoofModels.Reply(reply.Id),
+                    _ =>
+                        new UnSupportedSegment(),
+                });
             }
             return messages;
         }
@@ -36,27 +36,23 @@ public static class MsgHelper
         public MsgChain ToOneBotMsgChain()
         {
             MsgChain msgChain = [];
-            foreach (var message in messages)
+            foreach (var segment in messages)
             {
-                switch (message)
+                msgChain.Add(segment switch
                 {
-                    case WoofModels.Text textMessage:
-                        msgChain.Add(new PlainText(textMessage.Content));
-                        break;
-                    case WoofModels.Image imageMessage:
-                        msgChain.Add(new Image(imageMessage.File));
-                        break;
-                    case WoofModels.At atMessage:
-                        if (atMessage.Target == "all")
-                        {
-                            msgChain.Add(new AtAll());
-                        }
-                        else
-                        {
-                            msgChain.Add(new At(long.Parse(atMessage.Target)));
-                        }
-                        break;
-                }
+                    WoofModels.Text text =>
+                        new PlainText(text.Content),
+                    WoofModels.Image image =>
+                        new Image(image.File),
+                    WoofModels.At at =>
+                        at.Target == "all"
+                            ? new AtAll()
+                            : new At(long.Parse(at.Target)),
+                    WoofModels.Reply reply =>
+                        new Reply(reply.MessageId),
+                    _ =>
+                        new PlainText("[Unsupported Message Segment]"),
+                });
             }
             return msgChain;
         }
