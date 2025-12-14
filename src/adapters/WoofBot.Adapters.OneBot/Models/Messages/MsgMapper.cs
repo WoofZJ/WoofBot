@@ -20,6 +20,12 @@ public static class MsgHelper
                         messages.Add(new WoofModels.ImageRecv(
                             imageRecvSegment.File, imageRecvSegment.Url, imageRecvSegment.FileSize));
                         break;
+                    case At atSegment:
+                        messages.Add(new WoofModels.At(atSegment.Qq.ToString()));
+                        break;
+                    case AtAll:
+                        messages.Add(new WoofModels.At("all"));
+                        break;
                 }
             }
             return messages;
@@ -39,6 +45,16 @@ public static class MsgHelper
                         break;
                     case WoofModels.Image imageMessage:
                         msgChain.Add(new Image(imageMessage.File));
+                        break;
+                    case WoofModels.At atMessage:
+                        if (atMessage.Target == "all")
+                        {
+                            msgChain.Add(new AtAll());
+                        }
+                        else
+                        {
+                            msgChain.Add(new At(long.Parse(atMessage.Target)));
+                        }
                         break;
                 }
             }

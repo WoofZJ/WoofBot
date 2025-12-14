@@ -12,6 +12,10 @@ public record ImageRecv(
     long FileSize
 ) : MessageSegment;
 
+public record At(
+    string Target
+) : MessageSegment;
+
 public class Messages : List<MessageSegment>
 {
 }
