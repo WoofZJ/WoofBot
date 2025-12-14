@@ -1,6 +1,10 @@
 ﻿using Fleck;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Models;
+using WoofBot.Adapters.OneBot.Serializer;
+using WoofBot.Adapters.OneBot.Models.Events;
+using WoofBot.Adapters.OneBot.Models.Messages;
+using WoofBot.Adapters.OneBot.Models.Apis;
 
 namespace WoofBot.Adapters.OneBot;
 
@@ -15,11 +19,12 @@ public class OneBotAdapter(OneBotConfig config) : IAdapter
 {
     public string Name => "OneBot";
 
-    public event Func<Event, Task> OnEventReceived;
+    public event Func<Event, IAdapter, Task>? OnEventReceived;
 
     private readonly OneBotConfig _config = config;
     private WebSocketServer? _server;
     private IWebSocketConnection? _socket;
+    private readonly Dictionary<string, TaskCompletionSource<ApiData>> PendingApiCalls = [];
 
     public async Task StartAsync()
     {
@@ -38,9 +43,9 @@ public class OneBotAdapter(OneBotConfig config) : IAdapter
                     return;
                 }
                 _socket = socket;
-                socket.OnMessage = (message) =>
+                socket.OnMessage = async (message) =>
                 {
-                    Console.WriteLine($"Received message: {message}");
+                    await HandleMessageAsync(message);
                 };
             };
             socket.OnClose = () =>
@@ -56,10 +61,80 @@ public class OneBotAdapter(OneBotConfig config) : IAdapter
         }
     }
 
-    public Task SendMessageAsync(Target target, Messages messages)
+    private async Task HandleMessageAsync(string message)
     {
-        throw new NotImplementedException();
+        Console.WriteLine("Received message: " + message);
+        EventBase? evt = OneBotSerializer.Deserialize<EventBase>(message);
+        if (evt is null)
+        {
+            Console.WriteLine("Failed to deserialize message.");
+        }
+        switch (evt)
+        {
+            case GroupMessageEvent groupMsgEvt:
+                {
+                    MessageEvent msgEvt = new(
+                        new(TargetType.Group, groupMsgEvt.GroupId.ToString()),
+                        groupMsgEvt.Sender.UserId.ToString(),
+                        groupMsgEvt.Message.ToWoofBotMessages()
+                    );
+                    if (OnEventReceived is not null)
+                    {
+                        await OnEventReceived.Invoke(msgEvt, this);
+                    }
+                }
+                break;
+            case IApiEvent<ApiData> apiEvt:
+                {
+                    if (PendingApiCalls.TryGetValue(apiEvt.Echo, out TaskCompletionSource<ApiData>? tcs))
+                    {
+                        tcs.SetResult(apiEvt.Data);
+                        PendingApiCalls.Remove(apiEvt.Echo);
+                    }
+                }
+                break;
+            default:
+                Console.WriteLine("Unsupported event type.");
+                break;
+        }
     }
+
+    public async Task SendMessageAsync(Target target, Messages messages)
+    {
+        if (_socket is null) throw new InvalidOperationException("Socket is not connected.");
+        MsgChain oneBotMessage = messages.ToOneBotMsgChain();
+        switch (target.Type)
+        {
+            case TargetType.Group:
+                await SendGroupMsgAsync(long.Parse(target.Id), oneBotMessage);
+                break;
+            case TargetType.Private:
+                await SendPrivateMsgAsync(long.Parse(target.Id), oneBotMessage);
+                break;
+            default:
+                throw new NotSupportedException("Target type not supported.");
+        }
+    }
+
+    private async Task<TData> CallApiAsync<TPayload, TData>(string action, TPayload payload) where TPayload : ApiPayload where TData : ApiData
+    {
+        if (_socket == null) throw new InvalidOperationException("Socket is not connected.");
+        var echo = $"{action}/{Guid.NewGuid():N}";
+        PendingApiCalls[echo] = new TaskCompletionSource<ApiData>();
+        await _socket.Send(OneBotSerializer.Serialize(new
+        {
+            action,
+            @params = payload,
+            echo
+        }));
+        return (TData)await PendingApiCalls[echo].Task;
+    }
+
+    private async Task<SendGroupMsgData> SendGroupMsgAsync(long groupId, MsgChain message) =>
+        await CallApiAsync<SendGroupMsgPayload, SendGroupMsgData>("send_group_msg", new (groupId, message));
+
+    private async Task<SendPrivateMsgData> SendPrivateMsgAsync(long userId, MsgChain message) =>
+        await CallApiAsync<SendPrivateMsgPayload, SendPrivateMsgData>("send_private_msg", new (userId, message));
 
     public Task StopAsync()
     {
