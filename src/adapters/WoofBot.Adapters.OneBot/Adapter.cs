@@ -68,22 +68,10 @@ public class OneBotAdapter(OneBotConfig config) : IAdapter
         if (evt is null)
         {
             Console.WriteLine("Failed to deserialize message.");
+            return;
         }
         switch (evt)
         {
-            case GroupMessageEvent groupMsgEvt:
-                {
-                    MessageEvent msgEvt = new(
-                        new(TargetType.Group, groupMsgEvt.GroupId.ToString()),
-                        groupMsgEvt.Sender.UserId.ToString(),
-                        groupMsgEvt.Message.ToWoofBotMessages()
-                    );
-                    if (OnEventReceived is not null)
-                    {
-                        await OnEventReceived.Invoke(msgEvt, this);
-                    }
-                }
-                break;
             case IApiEvent<ApiData> apiEvt:
                 {
                     if (PendingApiCalls.TryGetValue(apiEvt.Echo, out TaskCompletionSource<ApiData>? tcs))
@@ -93,8 +81,14 @@ public class OneBotAdapter(OneBotConfig config) : IAdapter
                     }
                 }
                 break;
-            default:
-                Console.WriteLine("Unsupported event type.");
+            case OneBotEvent onebotEvt:
+                {
+                    var woofEvent = onebotEvt.ToWoofBotEvent();
+                    if (woofEvent is not null && OnEventReceived is not null)
+                    {
+                        await OnEventReceived(woofEvent, this);
+                    }
+                }
                 break;
         }
     }
@@ -131,10 +125,10 @@ public class OneBotAdapter(OneBotConfig config) : IAdapter
     }
 
     private async Task<SendGroupMsgData> SendGroupMsgAsync(long groupId, MsgChain message) =>
-        await CallApiAsync<SendGroupMsgPayload, SendGroupMsgData>("send_group_msg", new (groupId, message));
+        await CallApiAsync<SendGroupMsgPayload, SendGroupMsgData>("send_group_msg", new(groupId, message));
 
     private async Task<SendPrivateMsgData> SendPrivateMsgAsync(long userId, MsgChain message) =>
-        await CallApiAsync<SendPrivateMsgPayload, SendPrivateMsgData>("send_private_msg", new (userId, message));
+        await CallApiAsync<SendPrivateMsgPayload, SendPrivateMsgData>("send_private_msg", new(userId, message));
 
     public Task StopAsync()
     {
