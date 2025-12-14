@@ -93,18 +93,16 @@ public class OneBotAdapter(OneBotConfig config) : IAdapter
         }
     }
 
-    public async Task SendMessageAsync(Target target, Messages messages)
+    public async Task<long> SendMessageAsync(Target target, Messages messages)
     {
         if (_socket is null) throw new InvalidOperationException("Socket is not connected.");
         MsgChain oneBotMessage = messages.ToOneBotMsgChain();
         switch (target.Type)
         {
             case TargetType.Group:
-                await SendGroupMsgAsync(long.Parse(target.Id), oneBotMessage);
-                break;
+                return (await SendGroupMsgAsync(long.Parse(target.Id), oneBotMessage)).MessageId;
             case TargetType.Private:
-                await SendPrivateMsgAsync(long.Parse(target.Id), oneBotMessage);
-                break;
+                return (await SendPrivateMsgAsync(long.Parse(target.Id), oneBotMessage)).MessageId;
             default:
                 throw new NotSupportedException("Target type not supported.");
         }

@@ -33,6 +33,10 @@ public record At(
 
 public record AtAll(string Qq = "all") : MsgSegment;
 
+public record Reply(
+    long Id
+) : MsgSegment;
+
 public record MarketFace(
     int EmojiPackageId,
     string EmojiId,

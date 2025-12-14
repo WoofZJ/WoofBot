@@ -8,7 +8,7 @@ public interface IAdapter
 
     Task StartAsync();
     Task StopAsync();
-    Task SendMessageAsync(Target target, Messages messages);
+    Task<long> SendMessageAsync(Target target, Messages messages);
 
     event Func<Event, IAdapter, Task> OnEventReceived;
 }
