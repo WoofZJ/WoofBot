@@ -24,8 +24,12 @@ public static class MsgHelper
                         new WoofModels.At("all"),
                     Reply reply =>
                         new WoofModels.Reply(reply.Id),
+                    Face face =>
+                        new WoofModels.Face(face.Id),
+                    MarketFace mface =>
+                        new WoofModels.Sticker(mface.EmojiPackageId, mface.EmojiId, mface.Key),
                     _ =>
-                        new UnSupportedSegment(),
+                        new WoofModels.UnSupportedSegment(),
                 });
             }
             return messages;
@@ -50,6 +54,10 @@ public static class MsgHelper
                             : new At(long.Parse(at.Target)),
                     WoofModels.Reply reply =>
                         new Reply(reply.MessageId),
+                    WoofModels.Face face =>
+                        new Face(face.Id),
+                    WoofModels.Sticker sticker =>
+                        new MarketFace(sticker.PackageId, sticker.EmojiId, sticker.Key),
                     _ =>
                         new PlainText("[Unsupported Message Segment]"),
                 });

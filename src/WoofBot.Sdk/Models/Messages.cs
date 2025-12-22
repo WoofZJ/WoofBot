@@ -22,6 +22,16 @@ public record Reply(
     long MessageId
 ) : MessageSegment;
 
+public record Face(
+    int Id
+) : MessageSegment;
+
+public record Sticker(
+    int PackageId,
+    string EmojiId,
+    string Key
+) : MessageSegment;
+
 public class Messages : List<MessageSegment>
 {
 }
