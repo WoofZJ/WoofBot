@@ -20,7 +20,7 @@ public static class EventMapper
                 case GroupMessageEvent groupMessageEvent:
                     return new WoofModels.MessageEvent(
                         new (WoofModels.TargetType.Group, groupMessageEvent.GroupId.ToString()),
-                        groupMessageEvent.GroupId.ToString(),
+                        groupMessageEvent.Sender.UserId.ToString(),
                         groupMessageEvent.Message.ToWoofBotMessages()
                     );
                 case OneBotMetaEvent:
