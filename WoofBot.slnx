@@ -8,5 +8,6 @@
   </Folder>
   <Folder Name="/src/plugins/">
     <Project Path="src/plugins/WoofBot.Plugins.Ping/WoofBot.Plugins.Ping.csproj" />
+    <Project Path="src/plugins/WoofBot.Plugins.Record/WoofBot.Plugins.Record.csproj" />
   </Folder>
 </Solution>
