@@ -1,5 +1,15 @@
+using System.Text.Json.Serialization;
+
 namespace WoofBot.Sdk.Models;
 
+[JsonDerivedType(typeof(UnSupportedSegment), typeDiscriminator: "unsupported")]
+[JsonDerivedType(typeof(Text), typeDiscriminator: "text")]
+[JsonDerivedType(typeof(Image), typeDiscriminator: "image")]
+[JsonDerivedType(typeof(ImageRecv), typeDiscriminator: "image_recv")]
+[JsonDerivedType(typeof(At), typeDiscriminator: "at")]
+[JsonDerivedType(typeof(Reply), typeDiscriminator: "reply")]
+[JsonDerivedType(typeof(Face), typeDiscriminator: "face")]
+[JsonDerivedType(typeof(Sticker), typeDiscriminator: "sticker")]
 public abstract record MessageSegment;
 
 public record UnSupportedSegment : MessageSegment;
