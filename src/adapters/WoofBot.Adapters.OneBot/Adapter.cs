@@ -18,6 +18,7 @@ public record OneBotConfig(
 public class OneBotAdapter(OneBotConfig config) : IAdapter
 {
     public string Name => "OneBot";
+    public string SelfId { get; set; } = string.Empty;
 
     public event Func<Event, IAdapter, Task>? OnEventReceived;
 
@@ -59,6 +60,9 @@ public class OneBotAdapter(OneBotConfig config) : IAdapter
             Console.WriteLine("Waiting for OneBot client connection...");
             await Task.Delay(2000);
         }
+        var loginInfo = await CallApiAsync<GetLoginInfoPayload, GetLoginInfoData>("get_login_info", new());
+        SelfId = loginInfo.UserId.ToString();
+        Console.WriteLine($"OneBot adapter started. Self ID: {SelfId}");
     }
 
     private async Task HandleMessageAsync(string message)

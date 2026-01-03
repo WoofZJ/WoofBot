@@ -5,6 +5,7 @@ namespace WoofBot.Sdk.Interfaces;
 public interface IAdapter
 {
     string Name { get; }
+    string SelfId { get; }
 
     Task StartAsync();
     Task StopAsync();
