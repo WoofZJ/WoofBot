@@ -17,6 +17,7 @@ if (coreConfig is null)
 }
 
 OneBotAdapter onebot = new(coreConfig);
+await onebot.StartAsync();
 
 var pluginsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins");
 if (Directory.Exists(pluginsDir))
@@ -50,6 +51,5 @@ if (Directory.Exists(pluginsDir))
     }
 }
 
-await onebot.StartAsync();
 await Task.Delay(-1);
 await onebot.StopAsync();
