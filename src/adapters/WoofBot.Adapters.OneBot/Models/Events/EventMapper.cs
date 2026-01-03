@@ -12,17 +12,22 @@ public static class EventMapper
             switch (oneBotEvent)
             {
                 case PrivateMessageEvent privateMessageEvent:
-                    return new WoofModels.MessageEvent(
-                        new (WoofModels.TargetType.Private, privateMessageEvent.UserId.ToString()),
-                        privateMessageEvent.UserId.ToString(),
-                        privateMessageEvent.Message.ToWoofBotMessages()
-                    );
+                    return new WoofModels.MessageEvent
+                    {
+                        Target = new (WoofModels.TargetType.Private, privateMessageEvent.UserId.ToString()),
+                        SenderId = privateMessageEvent.Sender.UserId.ToString(),
+                        Messages = privateMessageEvent.Message.ToWoofBotMessages(),
+                        Timestamp = DateTimeOffset.FromUnixTimeSeconds(privateMessageEvent.Time).UtcDateTime
+
+                    };
                 case GroupMessageEvent groupMessageEvent:
-                    return new WoofModels.MessageEvent(
-                        new (WoofModels.TargetType.Group, groupMessageEvent.GroupId.ToString()),
-                        groupMessageEvent.Sender.UserId.ToString(),
-                        groupMessageEvent.Message.ToWoofBotMessages()
-                    );
+                    return new WoofModels.MessageEvent
+                    {
+                        Target = new (WoofModels.TargetType.Group, groupMessageEvent.GroupId.ToString()),
+                        SenderId = groupMessageEvent.Sender.UserId.ToString(),
+                        Messages = groupMessageEvent.Message.ToWoofBotMessages(),
+                        Timestamp = DateTimeOffset.FromUnixTimeSeconds(groupMessageEvent.Time).UtcDateTime
+                    };
                 case OneBotMetaEvent:
                     // Ignore meta events (lifecycle & heartbeat)
                     return null;
