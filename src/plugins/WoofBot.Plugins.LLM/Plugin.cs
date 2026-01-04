@@ -9,6 +9,8 @@ using System.ComponentModel;
 using Microsoft.Extensions.AI;
 using System.Text.Json;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
+using OpenAI.Responses;
+using System.Text.Json.Serialization;
 
 namespace WoofBot.Plugins.LLM;
 
@@ -22,15 +24,17 @@ public record LLMPluginConfig
     public List<string> WakeWords { get; init; } = [];
 }
 
-[Description("Response format that you should follow.")]
+[Description("Structured response format that you should return.")]
 public record LLMResponse
 {
-    [Description("Whether a response is needed.")]
+    [JsonPropertyName("need_response")]
     public bool NeedResponse { get; init; } = false;
-    [Description("The text content to be sent in response.")]
-    public string ChatText { get; init; } = string.Empty;
-    [Description("Whether to end the current session.")]
-    public bool EndSession { get; init; } = false;
+    [JsonPropertyName("text_message")]
+    public List<string> TextMessage { get; init; } = [];
+    [JsonPropertyName("image_message_url")]
+    public string ImageMessageUrl { get; init; } = string.Empty;
+    [JsonPropertyName("end_whole_session")]
+    public bool EndWholeSession { get; init; } = false;
 }
 
 public class LLMPlugin : PluginBase<LLMPluginConfig>
@@ -66,7 +70,15 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                     {
                         Instructions = instructions,
                         ResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat.ForJsonSchema<LLMResponse>(),
-                        Tools = [AIFunctionFactory.Create(GetCurrentDateTime)]
+                        Tools = [
+                            AIFunctionFactory.Create(GetCurrentDateTime)
+                        ],
+                        RawRepresentationFactory = _ => new ChatCompletionOptions
+                        {
+                            #pragma warning disable OPENAI001
+                            ReasoningEffortLevel = "minimal",
+                            #pragma warning restore OPENAI001
+                        },
                     }
                 }
             );
@@ -74,6 +86,9 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
 
     protected override async Task HandleEventAsync(Event evt, IAdapter adapter)
     {
+        try
+        {
+
         if (evt is not MessageEvent || _agent is null) return;
         var msgEvt = (MessageEvent)evt;
         if (msgEvt.Target.Type is not TargetType.Group
@@ -89,7 +104,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         }
         if (_agentThreads.TryGetValue(msgEvt.Target.Id, out AgentThread? thread))
         {
-            StringBuilder sb = new($"<{msgEvt.Timestamp}> User({msgEvt.SenderId}): ");
+            StringBuilder sb = new($"User({msgEvt.SenderId}): ");
             List<string> images = [];
             foreach (var msg in msgEvt.Messages)
             {
@@ -102,12 +117,14 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                         sb.Append(at.Target == adapter.SelfId ? "@(我)" : $"@({at.Target})");
                         break;
                     case ImageRecv img:
-                        sb.Append($"[图片,filename={img.File}]");
                         if (img.FileSize <= 4 * 1024 * 1024)
                         {
-                            // var imgBytes = await GetImageFromUrl(img.Url);
-                            // images.Add(imgBytes);
                             images.Add(img.Url);
+                            sb.Append($"[图片,filename={img.File}]");
+                        }
+                        else
+                        {
+                            sb.Append("[图片,文件过大未接收]");
                         }
                         break;
                 }
@@ -124,15 +141,26 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
             Console.WriteLine(llmResponse);
             if (llmResponse.NeedResponse)
             {
-                await adapter.SendMessageAsync(msgEvt.Target, [new Text(llmResponse.ChatText)]);
+                foreach (var textMsg in llmResponse.TextMessage)
+                {
+                    await adapter.SendMessageAsync(
+                        msgEvt.Target,
+                        [new Text(textMsg)]
+                    );
+                    await Task.Delay(Random.Shared.Next(1000, 5000));
+                }
             }
-            if (llmResponse.EndSession)
+            if (llmResponse.EndWholeSession)
             {
-                // write thread to file
                 var json = thread.Serialize(JsonSerializerOptions.Web);
                 File.WriteAllText($"llm_thread_{msgEvt.Target.Id}_{DateTimeOffset.Now.ToUnixTimeSeconds()}.json", json.ToString());
                 _agentThreads.Remove(msgEvt.Target.Id);
             }
+        }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in LLMPlugin.HandleEventAsync: {ex}");
         }
     }
 
@@ -142,4 +170,5 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         Console.WriteLine("GetCurrentDateTime called.");
         return DateTime.UtcNow;
     }
+
 }
