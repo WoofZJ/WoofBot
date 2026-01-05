@@ -10,7 +10,7 @@ using Microsoft.Extensions.AI;
 using System.Text.Json;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using OpenAI.Responses;
-using System.Text.Json.Serialization;
+using System.Net.Http.Json;
 
 namespace WoofBot.Plugins.LLM;
 
@@ -75,7 +75,9 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                         Instructions = instructions,
                         ResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat.ForJsonSchema<LLMResponse>(),
                         Tools = [
-                            AIFunctionFactory.Create(GetCurrentDateTime)
+                            AIFunctionFactory.Create(GetCurrentDateTime),
+                            AIFunctionFactory.Create(GenerateImage),
+                            AIFunctionFactory.Create(EditImage),
                         ],
                         RawRepresentationFactory = _ => new ChatCompletionOptions
                         {
@@ -101,7 +103,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
             || !Config.EnabledGroups.Contains(msgEvt.Target.Id))
             return;
         AppendChatMessage(adapter, msgEvt);
-        if (!_activeSessions.Contains(msgEvt.Target.Id) && 
+        if (!_activeSessions.Contains(msgEvt.Target.Id) &&
             (msgEvt.Messages.Contains(new At(adapter.SelfId)) ||
                 msgEvt.Messages.Any(m => m is Text text && Config.WakeWords.Any(ww => text.Content.Contains(ww)))))
         {
@@ -123,7 +125,14 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                         msgEvt.Target,
                         [new Text(textMsg)]
                     );
-                    await Task.Delay(Random.Shared.Next(1000, 5000));
+                    await Task.Delay(Random.Shared.Next(1000, 3000));
+                }
+                if (!string.IsNullOrEmpty(llmResponse.ImageMessageUrl))
+                {
+                    await adapter.SendMessageAsync(
+                        msgEvt.Target,
+                        [new Image(llmResponse.ImageMessageUrl)]
+                    );
                 }
             }
             if (llmResponse.EndWholeSession)
@@ -160,7 +169,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                     if (img.FileSize <= 4 * 1024 * 1024)
                     {
                         images.Add(img.Url);
-                        sb.Append($"[图片,filename={img.File}]");
+                        sb.Append($"[图片,url={img.Url}]");
                     }
                     else
                     {
@@ -188,4 +197,88 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         return DateTime.UtcNow;
     }
 
+    [Description("Generate an image based on the given prompt. Returns the image URL.")]
+    private async Task<string> GenerateImage(
+        [Description("The prompt describing the image to generate. You can describe the style, content, colors, and other details of the image you want.")]
+        string prompt)
+    {
+        try
+        {
+            Console.WriteLine($"Generating image with prompt: {prompt}");
+            using var httpClient = new HttpClient();
+            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ApiKey);
+
+            var requestBody = new
+            {
+                model = Config.ImageModel,
+                prompt = prompt,
+                sequential_image_generation = "disabled",
+                response_format = "url",
+                size = "2K",
+                stream = false,
+                watermark = true
+            };
+            var response = await httpClient.PostAsJsonAsync($"{Config.Endpoint}/images/generations", requestBody);
+            response.EnsureSuccessStatusCode();
+
+            var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>();
+            if (jsonResponse.TryGetProperty("data", out var data) && data.GetArrayLength() > 0)
+            {
+                var url = data[0].GetProperty("url").GetString();
+                Console.WriteLine($"Generated image URL: {url}");
+                return url ?? "Error: Image URL not found.";
+            }
+            return "Error: Failed to parse image URL from response.";
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error generating image: {ex.Message}");
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    [Description("Edit an existing image based on the given prompt. Returns the edited image URL.")]
+    private async Task<string> EditImage(
+        [Description("The URL of the image to be edited.")]
+        string imageUrl,
+        [Description("The prompt describing the edits to be made to the image.")]
+        string prompt)
+    {
+        try
+        {
+            Console.WriteLine($"Editing image {imageUrl} with prompt: {prompt}");
+            using var httpClient = new HttpClient();
+            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ApiKey);
+
+            var requestBody = new
+            {
+                model = Config.ImageModel,
+                prompt = prompt,
+                image = imageUrl,
+                sequential_image_generation = "disabled",
+                response_format = "url",
+                size = "2K",
+                stream = false,
+                watermark = true
+            };
+
+            var response = await httpClient.PostAsJsonAsync($"{Config.Endpoint}/images/generations", requestBody);
+            response.EnsureSuccessStatusCode();
+
+            var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>();
+            if (jsonResponse.TryGetProperty("data", out var data) && data.GetArrayLength() > 0)
+            {
+                var url = data[0].GetProperty("url").GetString();
+                Console.WriteLine($"Edited image URL: {url}");
+                return url ?? "Error: Image URL not found.";
+            }
+
+            return "Error: Failed to parse image URL from response.";
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error editing image: {ex.Message}");
+            return $"Error: {ex.Message}";
+        }
+    }
 }
