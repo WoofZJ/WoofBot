@@ -22,18 +22,21 @@ public record LLMPluginConfig
     public string InstructionsFilePath { get; init; } = string.Empty;
     public string ModelName { get; init; } = string.Empty;
     public List<string> WakeWords { get; init; } = [];
+    public int ContextLength { get; init; }
+    public string ImageModel { get; init; } = string.Empty;
+    public string SpeechModel { get; init; } = string.Empty;
 }
 
 [Description("Structured response format that you should return.")]
 public record LLMResponse
 {
-    [JsonPropertyName("need_response")]
+    [Description("Whether a response message is needed.")]
     public bool NeedResponse { get; init; } = false;
-    [JsonPropertyName("text_message")]
+    [Description("The text messages to send back. You can break long messages into multiple parts, and each part will be sent sequentially. Don't break into too many parts to avoid spamming.")]
     public List<string> TextMessage { get; init; } = [];
-    [JsonPropertyName("image_message_url")]
+    [Description("The image message URL to send back.")]
     public string ImageMessageUrl { get; init; } = string.Empty;
-    [JsonPropertyName("end_whole_session")]
+    [Description("Whether to end the whole session and clear the context.")]
     public bool EndWholeSession { get; init; } = false;
 }
 
@@ -43,6 +46,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
 
     private ChatClientAgent? _agent;
     private Dictionary<string, AgentThread> _agentThreads = [];
+    private HashSet<string> _activeSessions = [];
 
     public override void Initialize()
     {
@@ -76,67 +80,39 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                         RawRepresentationFactory = _ => new ChatCompletionOptions
                         {
                             #pragma warning disable OPENAI001
-                            ReasoningEffortLevel = "minimal",
+                            ReasoningEffortLevel = "low",
                             #pragma warning restore OPENAI001
                         },
-                    }
+                    },
+                    ChatMessageStoreFactory = ctx => new InMemoryChatMessageStore(
+                        #pragma warning disable MEAI001
+                        new MessageCountingChatReducer(Config.ContextLength),
+                        #pragma warning restore MEAI001
+                        ctx.SerializedState, ctx.JsonSerializerOptions)
                 }
             );
     }
 
     protected override async Task HandleEventAsync(Event evt, IAdapter adapter)
     {
-        try
-        {
-
         if (evt is not MessageEvent || _agent is null) return;
         var msgEvt = (MessageEvent)evt;
         if (msgEvt.Target.Type is not TargetType.Group
             || !Config.EnabledGroups.Contains(msgEvt.Target.Id))
             return;
-        if (msgEvt.Messages.Contains(new At(adapter.SelfId))
-            || msgEvt.Messages.Any(m => m is Text text && Config.WakeWords.Any(ww => text.Content.Contains(ww))))
+        AppendChatMessage(adapter, msgEvt);
+        if (!_activeSessions.Contains(msgEvt.Target.Id) && 
+            (msgEvt.Messages.Contains(new At(adapter.SelfId)) ||
+                msgEvt.Messages.Any(m => m is Text text && Config.WakeWords.Any(ww => text.Content.Contains(ww)))))
         {
-            if (!_agentThreads.ContainsKey(msgEvt.Target.Id))
-            {
-                _agentThreads[msgEvt.Target.Id] = _agent.GetNewThread();
-            }
+
+            _activeSessions.Add(msgEvt.Target.Id);
+            Console.WriteLine($"[LLMPlugin] Activated session for group {msgEvt.Target.Id}");
         }
-        if (_agentThreads.TryGetValue(msgEvt.Target.Id, out AgentThread? thread))
+        if (_activeSessions.Contains(msgEvt.Target.Id) && 
+            _agentThreads.TryGetValue(msgEvt.Target.Id, out AgentThread? thread))
         {
-            StringBuilder sb = new($"User({msgEvt.SenderId}): ");
-            List<string> images = [];
-            foreach (var msg in msgEvt.Messages)
-            {
-                switch (msg)
-                {
-                    case Text text:
-                        sb.Append(text.Content);
-                        break;
-                    case At at:
-                        sb.Append(at.Target == adapter.SelfId ? "@(我)" : $"@({at.Target})");
-                        break;
-                    case ImageRecv img:
-                        if (img.FileSize <= 4 * 1024 * 1024)
-                        {
-                            images.Add(img.Url);
-                            sb.Append($"[图片,filename={img.File}]");
-                        }
-                        else
-                        {
-                            sb.Append("[图片,文件过大未接收]");
-                        }
-                        break;
-                }
-            }
-            List<AIContent> contents = [new TextContent(sb.ToString())];
-            foreach (var imgUrl in images)
-            {
-                contents.Add(new UriContent(imgUrl, "image/jpeg"));
-            }
-            ChatMessage userMessage = new (ChatRole.User, contents);
-            Console.WriteLine(userMessage);
-            var response = await _agent.RunAsync<LLMResponse>(userMessage, thread);
+            var response = await _agent.RunAsync<LLMResponse>(thread);
             var llmResponse = response.Deserialize<LLMResponse>(JsonSerializerOptions.Web);
             Console.WriteLine(llmResponse);
             if (llmResponse.NeedResponse)
@@ -155,13 +131,54 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                 var json = thread.Serialize(JsonSerializerOptions.Web);
                 File.WriteAllText($"llm_thread_{msgEvt.Target.Id}_{DateTimeOffset.Now.ToUnixTimeSeconds()}.json", json.ToString());
                 _agentThreads.Remove(msgEvt.Target.Id);
+                _activeSessions.Remove(msgEvt.Target.Id);
             }
         }
-        }
-        catch (Exception ex)
+    }
+
+    private void AppendChatMessage(IAdapter adapter, MessageEvent msgEvt)
+    {
+        if (_agent is null) return;
+        if (!_agentThreads.TryGetValue(msgEvt.Target.Id, out AgentThread? thread))
         {
-            Console.WriteLine($"Error in LLMPlugin.HandleEventAsync: {ex}");
+            thread = _agent.GetNewThread();
+            _agentThreads[msgEvt.Target.Id] = thread;
         }
+        StringBuilder sb = new($"User({msgEvt.SenderId}): ");
+        List<string> images = [];
+        foreach (var msg in msgEvt.Messages)
+        {
+            switch (msg)
+            {
+                case Text text:
+                    sb.Append(text.Content);
+                    break;
+                case At at:
+                    sb.Append(at.Target == adapter.SelfId ? "@(我)" : $"@({at.Target})");
+                    break;
+                case ImageRecv img:
+                    if (img.FileSize <= 4 * 1024 * 1024)
+                    {
+                        images.Add(img.Url);
+                        sb.Append($"[图片,filename={img.File}]");
+                    }
+                    else
+                    {
+                        sb.Append("[图片,文件过大未接收]");
+                    }
+                    break;
+            }
+        }
+        List<AIContent> contents = [new TextContent(sb.ToString())];
+        foreach (var imgUrl in images)
+        {
+            contents.Add(new UriContent(imgUrl, "image/jpeg"));
+        }
+        ChatMessage userMessage = new (ChatRole.User, contents);
+        var history = thread.GetService<IList<ChatMessage>>();
+        Console.WriteLine("history has count: " + history?.Count);
+        history?.Add(userMessage);
+        Console.WriteLine($"Appended user message {userMessage} to thread.");
     }
 
     [Description("Get current Utc DateTime.")]
