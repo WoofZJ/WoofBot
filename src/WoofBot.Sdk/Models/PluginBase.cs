@@ -58,7 +58,14 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
             adapter.OnEventReceived += async (evt, _) =>
             {
                 if (!IsEnabled) return;
-                await HandleEventAsync(evt, adapter);
+                try
+                {
+                    await HandleEventAsync(evt, adapter);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Error] Exception in plugin {Name} handling event: {ex.Message}");
+                }
             };
             Adapters.Add(adapter);
             Console.WriteLine($"[System] Plugin {Name} subscribed to adapter {adapter.Name}");
