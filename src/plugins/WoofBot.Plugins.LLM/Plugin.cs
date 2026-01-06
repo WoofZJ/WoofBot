@@ -29,6 +29,7 @@ public record LLMPluginConfig
     public string ImageEndpoint { get; init; } = string.Empty;
     public string ImageApiKey { get; init; } = string.Empty;
     public string VideoModel { get; init; } = string.Empty;
+    public int DebounceDelayMs { get; init; }
 }
 
 [Description("你应该遵循的响应格式")]
@@ -53,7 +54,6 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounceCts = new();
     private readonly ConcurrentDictionary<string, ConcurrentQueue<ChatMessage>> _pendingMessages = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _groupLocks = new();
-    private const int DEBOUNCE_DELAY_MS = 6000;
 
     public override void Initialize()
     {
@@ -132,7 +132,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
     {
         try
         {
-            await Task.Delay(DEBOUNCE_DELAY_MS, token);
+            await Task.Delay(Config.DebounceDelayMs, token);
         }
         catch (TaskCanceledException)
         {
@@ -213,7 +213,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                     sb.Append(text.Content);
                     break;
                 case At at:
-                    sb.Append(at.Target == adapter.SelfId ? "@(我)" : $"@({at.Target})");
+                    sb.Append(at.Target == adapter.SelfId ? $"@({Config.WakeWords.First()})" : $"@({at.Target})");
                     break;
                 case ImageRecv img:
                     if (img.FileSize <= 4 * 1024 * 1024)
@@ -225,6 +225,9 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                     {
                         sb.Append("[图片,文件过大未接收]");
                     }
+                    break;
+                default:
+                    sb.Append("[未知消息类型]");
                     break;
             }
         }
