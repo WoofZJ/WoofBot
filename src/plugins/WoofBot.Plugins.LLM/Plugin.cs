@@ -11,6 +11,8 @@ using System.Text.Json;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using OpenAI.Responses;
 using System.Net.Http.Json;
+using System.Collections.Concurrent;
+using System.Threading;
 
 namespace WoofBot.Plugins.LLM;
 
@@ -24,20 +26,20 @@ public record LLMPluginConfig
     public List<string> WakeWords { get; init; } = [];
     public int ContextLength { get; init; }
     public string ImageModel { get; init; } = string.Empty;
-    public string SpeechModel { get; init; } = string.Empty;
+    public string ImageEndpoint { get; init; } = string.Empty;
+    public string ImageApiKey { get; init; } = string.Empty;
+    public string VideoModel { get; init; } = string.Empty;
 }
 
-[Description("Structured response format that you should return.")]
+[Description("你应该遵循的响应格式")]
 public record LLMResponse
 {
-    [Description("Whether a response message is needed.")]
+    [Description("是否需要发送回复消息。你处在群聊中，不是所有消息都需要回复，你应该只对明确提及到你的消息进行回复，只有在需要回复的时候才将此字段设为 true。")]
     public bool NeedResponse { get; init; } = false;
-    [Description("The text messages to send back. You can break long messages into multiple parts, and each part will be sent sequentially. Don't break into too many parts to avoid spamming.")]
+    [Description("要发送回去的文本消息。你可以将长消息拆分成多部分，每部分会依次发送。不要拆分成太多部分以避免刷屏。")]
     public List<string> TextMessage { get; init; } = [];
-    [Description("The image message URL to send back.")]
+    [Description("要发送回去的图片消息 URL。")]
     public string ImageMessageUrl { get; init; } = string.Empty;
-    [Description("Whether to end the whole session and clear the context.")]
-    public bool EndWholeSession { get; init; } = false;
 }
 
 public class LLMPlugin : PluginBase<LLMPluginConfig>
@@ -47,6 +49,11 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
     private ChatClientAgent? _agent;
     private Dictionary<string, AgentThread> _agentThreads = [];
     private HashSet<string> _activeSessions = [];
+    
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounceCts = new();
+    private readonly ConcurrentDictionary<string, ConcurrentQueue<ChatMessage>> _pendingMessages = new();
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _groupLocks = new();
+    private const int DEBOUNCE_DELAY_MS = 6000;
 
     public override void Initialize()
     {
@@ -102,57 +109,100 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         if (msgEvt.Target.Type is not TargetType.Group
             || !Config.EnabledGroups.Contains(msgEvt.Target.Id))
             return;
-        AppendChatMessage(adapter, msgEvt);
-        if (!_activeSessions.Contains(msgEvt.Target.Id) &&
-            (msgEvt.Messages.Contains(new At(adapter.SelfId)) ||
-                msgEvt.Messages.Any(m => m is Text text && Config.WakeWords.Any(ww => text.Content.Contains(ww)))))
-        {
 
-            _activeSessions.Add(msgEvt.Target.Id);
-            Console.WriteLine($"[LLMPlugin] Activated session for group {msgEvt.Target.Id}");
-        }
-        if (_activeSessions.Contains(msgEvt.Target.Id) && 
-            _agentThreads.TryGetValue(msgEvt.Target.Id, out AgentThread? thread))
+        var chatMessage = CreateChatMessage(adapter, msgEvt);
+        var queue = _pendingMessages.GetOrAdd(msgEvt.Target.Id, _ => new ConcurrentQueue<ChatMessage>());
+        queue.Enqueue(chatMessage);
+        
+        if (_debounceCts.TryGetValue(msgEvt.Target.Id, out var oldCts))
         {
-            var response = await _agent.RunAsync<LLMResponse>(thread);
-            var llmResponse = response.Deserialize<LLMResponse>(JsonSerializerOptions.Web);
-            Console.WriteLine(llmResponse);
-            if (llmResponse.NeedResponse)
+            oldCts.Cancel();
+            oldCts.Dispose();
+        }
+
+        var newCts = new CancellationTokenSource();
+        _debounceCts[msgEvt.Target.Id] = newCts;
+
+        _ = ProcessDebounceAsync(msgEvt.Target, adapter, newCts.Token);
+
+        await Task.CompletedTask;
+    }
+
+    private async Task ProcessDebounceAsync(Target target, IAdapter adapter, CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(DEBOUNCE_DELAY_MS, token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        if (token.IsCancellationRequested) return;
+
+        var semaphore = _groupLocks.GetOrAdd(target.Id, _ => new SemaphoreSlim(1, 1));
+        await semaphore.WaitAsync();
+
+        try
+        {
+            if (token.IsCancellationRequested) return;
+
+            if (!_agentThreads.TryGetValue(target.Id, out AgentThread? thread))
             {
-                foreach (var textMsg in llmResponse.TextMessage)
+                thread = _agent!.GetNewThread();
+                _agentThreads[target.Id] = thread;
+            }
+
+            var history = thread.GetService<IList<ChatMessage>>();
+            if (_pendingMessages.TryGetValue(target.Id, out var queue))
+            {
+                while (queue.TryDequeue(out var msg))
                 {
-                    await adapter.SendMessageAsync(
-                        msgEvt.Target,
-                        [new Text(textMsg)]
-                    );
-                    await Task.Delay(Random.Shared.Next(1000, 3000));
-                }
-                if (!string.IsNullOrEmpty(llmResponse.ImageMessageUrl))
-                {
-                    await adapter.SendMessageAsync(
-                        msgEvt.Target,
-                        [new Image(llmResponse.ImageMessageUrl)]
-                    );
+                    history?.Add(msg);
+                    Console.WriteLine($"[Debounce] Flushed message to thread history. Queue count: {queue.Count}");
                 }
             }
-            if (llmResponse.EndWholeSession)
+
+            if (true || _activeSessions.Contains(target.Id))
             {
-                var json = thread.Serialize(JsonSerializerOptions.Web);
-                File.WriteAllText($"llm_thread_{msgEvt.Target.Id}_{DateTimeOffset.Now.ToUnixTimeSeconds()}.json", json.ToString());
-                _agentThreads.Remove(msgEvt.Target.Id);
-                _activeSessions.Remove(msgEvt.Target.Id);
+                Console.WriteLine($"[Debounce] Invoking Agent for group {target.Id}");
+                var response = await _agent!.RunAsync<LLMResponse>(thread);
+                var llmResponse = response.Deserialize<LLMResponse>(JsonSerializerOptions.Web);
+                Console.WriteLine(llmResponse);
+                
+                if (llmResponse.NeedResponse)
+                {
+                    foreach (var textMsg in llmResponse.TextMessage)
+                    {
+                        await adapter.SendMessageAsync(
+                            target,
+                            [new Text(textMsg)]
+                        );
+                        await Task.Delay(Random.Shared.Next(1500, 4000));
+                    }
+                    if (!string.IsNullOrEmpty(llmResponse.ImageMessageUrl))
+                    {
+                        await adapter.SendMessageAsync(
+                            target,
+                            [new Image(llmResponse.ImageMessageUrl)]
+                        );
+                    }
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Debounce] Error processing group {target.Id}: {ex}");
+        }
+        finally
+        {
+            semaphore.Release();
         }
     }
 
-    private void AppendChatMessage(IAdapter adapter, MessageEvent msgEvt)
+    private ChatMessage CreateChatMessage(IAdapter adapter, MessageEvent msgEvt)
     {
-        if (_agent is null) return;
-        if (!_agentThreads.TryGetValue(msgEvt.Target.Id, out AgentThread? thread))
-        {
-            thread = _agent.GetNewThread();
-            _agentThreads[msgEvt.Target.Id] = thread;
-        }
         StringBuilder sb = new($"User({msgEvt.SenderId}): ");
         List<string> images = [];
         foreach (var msg in msgEvt.Messages)
@@ -183,11 +233,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         {
             contents.Add(new UriContent(imgUrl, "image/jpeg"));
         }
-        ChatMessage userMessage = new (ChatRole.User, contents);
-        var history = thread.GetService<IList<ChatMessage>>();
-        Console.WriteLine("history has count: " + history?.Count);
-        history?.Add(userMessage);
-        Console.WriteLine($"Appended user message {userMessage} to thread.");
+        return new ChatMessage(ChatRole.User, contents);
     }
 
     [Description("Get current Utc DateTime.")]
@@ -206,7 +252,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         {
             Console.WriteLine($"Generating image with prompt: {prompt}");
             using var httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ApiKey);
+            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
 
             var requestBody = new
             {
@@ -218,7 +264,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                 stream = false,
                 watermark = true
             };
-            var response = await httpClient.PostAsJsonAsync($"{Config.Endpoint}/images/generations", requestBody);
+            var response = await httpClient.PostAsJsonAsync($"{Config.ImageEndpoint}/images/generations", requestBody);
             response.EnsureSuccessStatusCode();
 
             var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -248,7 +294,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         {
             Console.WriteLine($"Editing image {imageUrl} with prompt: {prompt}");
             using var httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ApiKey);
+            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
 
             var requestBody = new
             {
@@ -262,7 +308,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                 watermark = true
             };
 
-            var response = await httpClient.PostAsJsonAsync($"{Config.Endpoint}/images/generations", requestBody);
+            var response = await httpClient.PostAsJsonAsync($"{Config.ImageEndpoint}/images/generations", requestBody);
             response.EnsureSuccessStatusCode();
 
             var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>();
