@@ -50,6 +50,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
     private ChatClientAgent? _agent;
     private Dictionary<string, AgentThread> _agentThreads = [];
     private HashSet<string> _activeSessions = [];
+    private readonly ConcurrentDictionary<string, DateTime> _sessionLastActiveTime = new(); // Session timeout tracking
     
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounceCts = new();
     private readonly ConcurrentDictionary<string, ConcurrentQueue<ChatMessage>> _pendingMessages = new();
@@ -114,6 +115,42 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         var queue = _pendingMessages.GetOrAdd(msgEvt.Target.Id, _ => new ConcurrentQueue<ChatMessage>());
         queue.Enqueue(chatMessage);
         
+        lock (_activeSessions)
+        {
+            bool isActive = _activeSessions.Contains(msgEvt.Target.Id);
+            
+            // Check expiry
+            if (isActive && _sessionLastActiveTime.TryGetValue(msgEvt.Target.Id, out var lastTime))
+            {
+                if ((DateTime.UtcNow - lastTime).TotalMinutes > 5)
+                {
+                    _activeSessions.Remove(msgEvt.Target.Id);
+                    isActive = false;
+                    Console.WriteLine($"[LLMPlugin] Session expired for group {msgEvt.Target.Id}");
+                }
+            }
+
+            // Check activation
+            bool isWakeWord = msgEvt.Messages.Contains(new At(adapter.SelfId)) || 
+                              msgEvt.Messages.Any(m => m is Text text && Config.WakeWords.Any(ww => text.Content.Contains(ww)));
+                              
+            if (isWakeWord)
+            {
+                if (!isActive)
+                {
+                    _activeSessions.Add(msgEvt.Target.Id);
+                    isActive = true;
+                    Console.WriteLine($"[LLMPlugin] Activated session for group {msgEvt.Target.Id}");
+                }
+            }
+
+            // Update timestamp
+            if (isActive)
+            {
+                _sessionLastActiveTime[msgEvt.Target.Id] = DateTime.UtcNow;
+            }
+        }
+
         if (_debounceCts.TryGetValue(msgEvt.Target.Id, out var oldCts))
         {
             oldCts.Cancel();
@@ -164,7 +201,13 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                 }
             }
 
-            if (true || _activeSessions.Contains(target.Id))
+            bool isActiveSession = false;
+            lock (_activeSessions)
+            {
+                isActiveSession = _activeSessions.Contains(target.Id);
+            }
+
+            if (isActiveSession)
             {
                 Console.WriteLine($"[Debounce] Invoking Agent for group {target.Id}");
                 var response = await _agent!.RunAsync<LLMResponse>(thread);
