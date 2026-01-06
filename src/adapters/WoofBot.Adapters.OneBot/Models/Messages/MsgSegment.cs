@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace WoofBot.Adapters.OneBot.Models.Messages;
@@ -43,4 +44,9 @@ public record MarketFace(
     string Key,
     string? Summary = null,
     string? Url = null
+) : MsgSegment;
+
+public record UnknownMsgSegment(
+    string Type,
+    JsonElement Data
 ) : MsgSegment;
