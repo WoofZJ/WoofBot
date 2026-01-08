@@ -68,32 +68,39 @@ public class OneBotAdapter(OneBotConfig config) : IAdapter
     private async Task HandleMessageAsync(string message)
     {
         Console.WriteLine("Received message: " + message);
-        EventBase? evt = OneBotSerializer.Deserialize<EventBase>(message);
-        if (evt is null)
+        try
         {
-            Console.WriteLine("Failed to deserialize message.");
-            return;
+            EventBase? evt = OneBotSerializer.Deserialize<EventBase>(message);
+            if (evt is null)
+            {
+                Console.WriteLine("Failed to deserialize message.");
+                return;
+            }
+            switch (evt)
+            {
+                case IApiEvent<ApiData> apiEvt:
+                    {
+                        if (PendingApiCalls.TryGetValue(apiEvt.Echo, out TaskCompletionSource<ApiData>? tcs))
+                        {
+                            tcs.SetResult(apiEvt.Data);
+                            PendingApiCalls.Remove(apiEvt.Echo);
+                        }
+                    }
+                    break;
+                case OneBotEvent onebotEvt:
+                    {
+                        var woofEvent = onebotEvt.ToWoofBotEvent();
+                        if (woofEvent is not null && OnEventReceived is not null)
+                        {
+                            await OnEventReceived(woofEvent, this);
+                        }
+                    }
+                    break;
+            }
         }
-        switch (evt)
+        catch (Exception ex)
         {
-            case IApiEvent<ApiData> apiEvt:
-                {
-                    if (PendingApiCalls.TryGetValue(apiEvt.Echo, out TaskCompletionSource<ApiData>? tcs))
-                    {
-                        tcs.SetResult(apiEvt.Data);
-                        PendingApiCalls.Remove(apiEvt.Echo);
-                    }
-                }
-                break;
-            case OneBotEvent onebotEvt:
-                {
-                    var woofEvent = onebotEvt.ToWoofBotEvent();
-                    if (woofEvent is not null && OnEventReceived is not null)
-                    {
-                        await OnEventReceived(woofEvent, this);
-                    }
-                }
-                break;
+            Console.WriteLine("Error handling message: " + ex.Message);
         }
     }
 

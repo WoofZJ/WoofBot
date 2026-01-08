@@ -23,7 +23,7 @@ public class MsgSegmentJsonConverter : JsonConverter<MsgSegment>
                 "at" => data["qq"]?.GetValue<string>() == "all" ? new AtAll() : data.Deserialize<At>(options),
                 "mface" => data.Deserialize<MarketFace>(options),
                 "reply" => data.Deserialize<Reply>(options),
-                _ => new UnknownMsgSegment(type, data.GetValue<JsonElement>()),
+                _ => new UnknownMsgSegment(type, data),
             };
         }
         throw new NotSupportedException($"Unsupported MsgSegment type");
