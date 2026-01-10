@@ -10,6 +10,7 @@ namespace WoofBot.Sdk.Models;
 [JsonDerivedType(typeof(Reply), typeDiscriminator: "reply")]
 [JsonDerivedType(typeof(Face), typeDiscriminator: "face")]
 [JsonDerivedType(typeof(Sticker), typeDiscriminator: "sticker")]
+[JsonDerivedType(typeof(Video), typeDiscriminator: "video")]
 public abstract record MessageSegment;
 
 public record UnSupportedSegment : MessageSegment;
@@ -17,6 +18,8 @@ public record UnSupportedSegment : MessageSegment;
 public record Text(string Content) : MessageSegment;
 
 public record Image(string File) : MessageSegment;
+
+public record Video(string File) : MessageSegment;
 
 public record ImageRecv(
     string File,

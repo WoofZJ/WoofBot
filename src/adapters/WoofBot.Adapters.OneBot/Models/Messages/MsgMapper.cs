@@ -48,6 +48,8 @@ public static class MsgHelper
                         new PlainText(text.Content),
                     WoofModels.Image image =>
                         new Image(image.File),
+                    WoofModels.Video video =>
+                        new Video(video.File),
                     WoofModels.At at =>
                         at.Target == "all"
                             ? new AtAll()

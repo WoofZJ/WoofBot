@@ -13,6 +13,10 @@ public record Image(
     string File
 ) : MsgSegment;
 
+public record Video(
+    string File
+) : MsgSegment;
+
 public record ImageRecv : MsgSegment
 {
     public string File { get; init; } = string.Empty;

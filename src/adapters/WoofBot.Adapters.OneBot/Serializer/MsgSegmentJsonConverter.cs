@@ -40,6 +40,7 @@ public class MsgSegmentJsonConverter : JsonConverter<MsgSegment>
             At => "at",
             AtAll => "at",
             MarketFace => "mface",
+            Video => "video",
             _ => throw new NotSupportedException($"Unsupported MsgSegment type")
         });
         writer.WritePropertyName("data");
