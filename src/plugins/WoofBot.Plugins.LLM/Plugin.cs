@@ -13,6 +13,7 @@ using OpenAI.Responses;
 using System.Net.Http.Json;
 using System.Collections.Concurrent;
 using System.Threading;
+using System.Collections.Frozen;
 
 namespace WoofBot.Plugins.LLM;
 
@@ -41,6 +42,8 @@ public record LLMResponse
     public List<string> TextMessage { get; init; } = [];
     [Description("要发送回去的图片消息 URL。")]
     public string ImageMessageUrl { get; init; } = string.Empty;
+    [Description("要发送回去的视频消息任务 ID。")]
+    public string VideoTaskId { get; init; } = string.Empty;
 }
 
 public class LLMPlugin : PluginBase<LLMPluginConfig>
@@ -55,6 +58,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounceCts = new();
     private readonly ConcurrentDictionary<string, ConcurrentQueue<ChatMessage>> _pendingMessages = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _groupLocks = new();
+    private Timer _videoQueryTimer;
 
     public override void Initialize()
     {
@@ -86,6 +90,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                             AIFunctionFactory.Create(GetCurrentDateTime),
                             AIFunctionFactory.Create(GenerateImage),
                             AIFunctionFactory.Create(EditImage),
+                            AIFunctionFactory.Create(GenerateVideo)
                         ],
                         RawRepresentationFactory = _ => new ChatCompletionOptions
                         {
@@ -231,6 +236,48 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                             [new Image(llmResponse.ImageMessageUrl)]
                         );
                     }
+                    if (!string.IsNullOrEmpty(llmResponse.VideoTaskId))
+                    {
+                        _videoQueryTimer = new Timer(async _ =>
+                        {
+                            try
+                            {
+                                using var httpClient = new HttpClient();
+                                httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
+                                var statusResponse = await httpClient.GetAsync($"{Config.ImageEndpoint}/contents/generations/tasks/{llmResponse.VideoTaskId}");
+                                statusResponse.EnsureSuccessStatusCode();
+                                var statusJson = await statusResponse.Content.ReadFromJsonAsync<JsonElement>();
+                                Console.WriteLine($"[VideoQuery] Video generation status response: {statusJson}");
+                                if (statusJson.TryGetProperty("status", out var statusProp)
+                                    && statusProp.GetString() == "succeeded")
+                                {
+                                    if (statusJson.TryGetProperty("content", out var contentProp) &&
+                                        contentProp.TryGetProperty("video_url", out var videoUrlProp))
+                                    {
+                                        var videoUrl = videoUrlProp.GetString();
+                                        Console.WriteLine($"[VideoQuery] Generated video URL: {videoUrl}");
+                                        await adapter.SendMessageAsync(
+                                            target,
+                                            [new Text("视频生成好啦！")]
+                                        );
+                                        await adapter.SendMessageAsync(
+                                            target,
+                                            [new Video(videoUrl ?? "")]
+                                        );
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"[VideoQuery] Video URL not found in content.");
+                                    }
+                                    _videoQueryTimer?.Dispose();
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[VideoQuery] Error querying video generation status: {ex}");
+                            }
+                        }, null, 1000, 20000);
+                    }
                 }
             }
         }
@@ -373,4 +420,60 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
             return $"Error: {ex.Message}";
         }
     }
+
+    [Description("Generate a video based on the given prompt. Returns the video task id. Tell the user the video is being generated and they can wait for a while.")]
+    private async Task<string> GenerateVideo(
+        [Description("The prompt describing the video to generate.")]
+        string prompt,
+        [Description("The URL of the image to be used as a reference for video generation. Set it as empty string if not used.")]
+        string ImageUrl)
+    {
+        try
+        {
+            Console.WriteLine($"Generating video with prompt: {prompt}");
+            using var httpClient = new HttpClient();
+            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
+
+            List<object> contentList = new()
+            {
+                new {
+                    @type = "text",
+                    text = prompt
+                },
+            };
+            if (!string.IsNullOrEmpty(ImageUrl))
+            {
+                contentList.Add(new {
+                    @type = "image_url",
+                    image_url = new
+                    {
+                        url = ImageUrl
+                    }
+                });
+            }
+            var requestBody = new
+            {
+                model = Config.VideoModel,
+                content = contentList
+            };
+
+            var response = await httpClient.PostAsJsonAsync($"{Config.ImageEndpoint}/contents/generations/tasks", requestBody);
+            response.EnsureSuccessStatusCode();
+
+            var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Console.WriteLine($"Video generation response: {jsonResponse}");
+            if (jsonResponse.TryGetProperty("id", out var idJson))
+            {
+                string taskId = idJson.GetString() ?? string.Empty;
+                return taskId;
+            }
+            return "Error: Failed to parse image URL from response.";
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error editing image: {ex.Message}");
+            return $"Error: {ex.Message}";
+        }
+    }
 }
+
