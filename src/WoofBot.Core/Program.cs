@@ -1,14 +1,12 @@
 ﻿using System.Reflection;
 using System.Text.Json;
-using WoofBot.Sdk.Interfaces;
+using WoofBot.Adapters.Milky;
 using WoofBot.Adapters.OneBot;
+using WoofBot.Sdk.Interfaces;
 
 string json = File.ReadAllText("configs/core.json");
-var options = new JsonSerializerOptions
-{
-    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-};
-var coreConfig = JsonSerializer.Deserialize<OneBotConfig>(json, options);
+var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+var coreConfig = JsonSerializer.Deserialize<MilkyConfig>(json, options);
 
 if (coreConfig is null)
 {
@@ -16,7 +14,8 @@ if (coreConfig is null)
     return;
 }
 
-OneBotAdapter onebot = new(coreConfig);
+// OneBotAdapter onebot = new(coreConfig);
+MilkyAdapter onebot = new(coreConfig);
 await onebot.StartAsync();
 
 var pluginsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins");
@@ -29,14 +28,19 @@ if (Directory.Exists(pluginsDir))
             try
             {
                 var assembly = Assembly.LoadFrom(dll);
-                var pluginTypes = assembly.GetTypes()
-                    .Where(t => typeof(IPlugin).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract);
+                var pluginTypes = assembly
+                    .GetTypes()
+                    .Where(t =>
+                        typeof(IPlugin).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract
+                    );
 
                 foreach (var type in pluginTypes)
                 {
                     if (Activator.CreateInstance(type) is IPlugin plugin)
                     {
-                        Console.WriteLine($"[System] Loaded plugin: {plugin.Name} {plugin.Version}");
+                        Console.WriteLine(
+                            $"[System] Loaded plugin: {plugin.Name} {plugin.Version}"
+                        );
                         plugin.Initialize();
                         plugin.Subscribe(onebot);
                         plugin.Enable();
