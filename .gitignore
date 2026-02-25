@@ -485,3 +485,5 @@ $RECYCLE.BIN/
 
 # build output
 build/
+
+.vscode/
