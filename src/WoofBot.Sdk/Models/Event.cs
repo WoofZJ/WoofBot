@@ -14,4 +14,7 @@ public record MessageEvent : Event
 
 public record NotifyEvent : Event;
 
-public record CronEvent : Event;
+public record CronEvent : Event
+{
+    public string TaskName { get; init; } = string.Empty;
+}
