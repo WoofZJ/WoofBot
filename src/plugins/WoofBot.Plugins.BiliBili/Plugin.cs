@@ -16,6 +16,7 @@ public record BiliBiliPluginConfig
 {
     public List<SubscribeEntry> Subscriptions { get; init; } = [];
     public List<string> Admins { get; init; } = [];
+    public int PollIntervalMinutes { get; init; } = 10;
     public string PythonPath { get; init; } = "python";
     public string ScriptPath { get; init; } = "";
     public string OutputPath { get; init; } = "";
@@ -246,6 +247,10 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
     public override void Subscribe(IAdapter adapter)
     {
         base.Subscribe(adapter);
-        RegisterSchedule("bilibili-poll", TimeSpan.FromMinutes(10), adapter);
+        RegisterSchedule(
+            "bilibili-poll",
+            TimeSpan.FromMinutes(Config.PollIntervalMinutes),
+            adapter
+        );
     }
 }
