@@ -8,6 +8,7 @@
     <Project Path="src/adapters/WoofBot.Adapters.OneBot/WoofBot.Adapters.OneBot.csproj" />
   </Folder>
   <Folder Name="/src/plugins/">
+    <Project Path="src/plugins/WoofBot.Plugins.BiliBili/WoofBot.Plugins.BiliBili.csproj" />
     <Project Path="src/plugins/WoofBot.Plugins.LLM/WoofBot.Plugins.LLM.csproj" />
     <Project Path="src/plugins/WoofBot.Plugins.Ping/WoofBot.Plugins.Ping.csproj" />
     <Project Path="src/plugins/WoofBot.Plugins.Record/WoofBot.Plugins.Record.csproj" />
