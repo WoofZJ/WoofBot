@@ -211,8 +211,17 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         }
         if (evt is CronEvent cron && cron.TaskName == "bilibili-poll")
         {
-            var groups = Config.Subscriptions.Select(e => e.GroupId).ToArray();
-            await DoCheck(groups, adapter);
+            if (DateTimeOffset.Now.Hour >= 8)
+            {
+                var groups = Config.Subscriptions.Select(e => e.GroupId).ToArray();
+                await DoCheck(groups, adapter);
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"scheduled check triggered, but now is {DateTimeOffset.Now}. Skipped."
+                );
+            }
         }
     }
 

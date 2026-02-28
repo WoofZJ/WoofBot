@@ -26,7 +26,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 foreach ($plugin in $PluginProjects) {
     $pluginName = $plugin.BaseName
     Write-Host "=== Publishing $pluginName ===" -ForegroundColor Cyan
-    dotnet publish $plugin.FullName -c Release --runtime $Runtime --self-contained:$SelfContained -o "$PublishRoot/plugins/$pluginName"
+    dotnet publish $plugin.FullName -c Release --runtime $Runtime --no-self-contained -o "$PublishRoot/plugins/$pluginName"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 

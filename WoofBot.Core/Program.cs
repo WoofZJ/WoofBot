@@ -6,7 +6,7 @@ using WoofBot.Sdk.Serialization;
 string binDir = AppDomain.CurrentDomain.BaseDirectory;
 string rootDir = Path.Combine(binDir, "..");
 string configDir = Path.Combine(rootDir, "configs");
-string pluginsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins");
+string pluginsDir = Path.Combine(rootDir, "plugins");
 
 MilkyConfig milkyConfig = ConfigSerializer.LoadConfig<MilkyConfig>(
     Path.Combine(configDir, "core.json")
