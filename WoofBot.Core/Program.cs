@@ -16,6 +16,7 @@ if (coreConfig is null)
 
 // OneBotAdapter onebot = new(coreConfig);
 MilkyAdapter onebot = new(coreConfig);
+
 await onebot.StartAsync();
 
 var pluginsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins");
