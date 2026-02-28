@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Models;
+using WoofBot.Sdk.Serialization;
 
 namespace WoofBot.Plugins.BiliBili;
 
@@ -17,15 +18,14 @@ public record BiliBiliPluginConfig
     public List<SubscribeEntry> Subscriptions { get; init; } = [];
     public List<string> Admins { get; init; } = [];
     public int PollIntervalMinutes { get; init; } = 10;
-    public string PythonPath { get; init; } = "python";
-    public string ScriptPath { get; init; } = "";
-    public string OutputPath { get; init; } = "";
-    public string Proxy { get; init; } = "";
+    public string RequestUrl { get; init; } = "";
     public Dictionary<long, long> LastPubTimes { get; init; } = [];
 }
 
 public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
 {
+    private static readonly HttpClient _httpClient = new();
+
     public BiliBiliPlugin()
         : base("BiliBili", "1.0", "A BiliBili plugin") { }
 
@@ -41,7 +41,40 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             return $"{ts.Seconds}秒";
     }
 
-    Dictionary<long, List<Messages>> UpdateSubscribe(HashSet<long> userIds)
+    async Task<VideoInfo?> GetVideoInfoAsync(long userId)
+    {
+        var response = await _httpClient.SendAsync(
+            new HttpRequestMessage(
+                HttpMethod.Get,
+                Config.RequestUrl.TrimEnd('/') + $"/video/latest?user_id={userId}"
+            )
+        );
+        if (!response.IsSuccessStatusCode)
+            return null;
+        var json = await response.Content.ReadAsStringAsync();
+        var videoInfo = JsonSerializer.Deserialize<VideoInfo>(
+            json,
+            new JsonSerializerOptions() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }
+        );
+        return videoInfo;
+    }
+
+    async Task<string?> GetVideoInfoImageAsync(long userId)
+    {
+        var response = await _httpClient.SendAsync(
+            new HttpRequestMessage(
+                HttpMethod.Get,
+                Config.RequestUrl.TrimEnd('/') + $"/video/latest/image?user_id={userId}"
+            )
+        );
+        if (!response.IsSuccessStatusCode)
+            return null;
+        var imageBytes = await response.Content.ReadAsByteArrayAsync();
+        string base64String = Convert.ToBase64String(imageBytes);
+        return $"base64://{base64String}";
+    }
+
+    async Task<Dictionary<long, List<Messages>>> UpdateSubscribe(HashSet<long> userIds)
     {
         Dictionary<long, List<Messages>> result = [];
         Console.WriteLine($"Checking updates for user IDs: {string.Join(", ", userIds)}");
@@ -53,32 +86,26 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 Config.LastPubTimes[userId] = 0;
             }
             long lastPubTime = Config.LastPubTimes[userId];
-            var dynamics = GetDynamics(userId)
-                .Where(d => d.PubTime > lastPubTime)
-                .OrderByDescending(d => d.PubTime)
-                .ToArray();
-            if (dynamics.Length > 0)
+            var videoInfo = await GetVideoInfoAsync(userId);
+            if (videoInfo is not null && videoInfo.PublishTime > lastPubTime)
             {
-                var first = dynamics[0];
                 Console.WriteLine(
-                    $"Found new dynamic for user {userId}: {first.Title} (published at {DateTimeOffset.FromUnixTimeSeconds(first.PubTime)})"
+                    $"User {userId} has a new video published at {DateTimeOffset.FromUnixTimeSeconds(videoInfo.PublishTime)} (last checked at {DateTimeOffset.FromUnixTimeSeconds(lastPubTime)})"
                 );
-                messages.Add([new Image(first.Cover)]);
+                messages.Add([
+                    new Text(
+                        $"「{videoInfo.AuthorName}」于{TimeSpanToString(DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(videoInfo.PublishTime))}前更新了！"
+                    ),
+                ]);
+                string? image = await GetVideoInfoImageAsync(userId);
+                if (image is not null)
+                {
+                    messages.Add([new Image(image)]);
+                }
                 StringBuilder sb = new();
-                sb.AppendLine(
-                    $"「{first.AuthorName}」于{TimeSpanToString(DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(first.PubTime))}前更新了！"
-                );
-                sb.AppendLine(new string('-', 30));
-                sb.AppendLine($"标题：{first.Title}");
-                sb.AppendLine($"简介：{first.Desc}");
-                sb.AppendLine($"链接：{first.Url}");
-                sb.AppendLine(new string('-', 30));
-                sb.AppendLine($"截至当前数据：");
-                sb.AppendLine($"- 观看：{first.Views}");
-                sb.AppendLine($"- 弹幕：{first.Danmakus}");
-                sb.AppendLine($"- 点赞：{first.Likes}");
-                sb.AppendLine($"- 评论：{first.Comments}");
-                sb.AppendLine($"- 转发：{first.Forwards}");
+                sb.AppendLine(videoInfo.Description);
+                sb.AppendLine();
+                sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
                 messages.Add([new Text(sb.ToString().TrimEnd())]);
                 Config.LastPubTimes[userId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 UpdateConfig();
@@ -100,7 +127,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 userIds.Add(userId);
             }
         }
-        var updates = UpdateSubscribe(userIds);
+        var updates = await UpdateSubscribe(userIds);
         foreach (var entry in Config.Subscriptions)
         {
             if (!groups.Contains(entry.GroupId))
@@ -223,32 +250,6 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 );
             }
         }
-    }
-
-    private Dynamic[] GetDynamics(long userId)
-    {
-        ProcessStartInfo startInfo = new()
-        {
-            FileName = Config.PythonPath,
-            Arguments = $"{Config.ScriptPath} --proxy {Config.Proxy} --user {userId}",
-            RedirectStandardOutput = false,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        Console.WriteLine($"Executing Python script: {startInfo.FileName} {startInfo.Arguments}");
-        using Process process = Process.Start(startInfo)!;
-        process.WaitForExit(TimeSpan.FromSeconds(20));
-        string json = File.ReadAllText(Config.OutputPath);
-        Dynamic[]? dynamics = JsonSerializer.Deserialize<Dynamic[]>(
-            json,
-            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }
-        );
-        if (dynamics is null)
-        {
-            Console.WriteLine("[Error] Failed to parse dynamics from Python script output.");
-            return [];
-        }
-        return dynamics;
     }
 
     public override void Subscribe(IAdapter adapter)
