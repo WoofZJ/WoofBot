@@ -1,25 +1,20 @@
 ﻿using System.Reflection;
-using System.Text.Json;
 using WoofBot.Adapters.Milky;
-using WoofBot.Adapters.OneBot;
 using WoofBot.Sdk.Interfaces;
+using WoofBot.Sdk.Serialization;
 
-string json = File.ReadAllText("configs/core.json");
-var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
-var coreConfig = JsonSerializer.Deserialize<MilkyConfig>(json, options);
+string binDir = AppDomain.CurrentDomain.BaseDirectory;
+string rootDir = Path.Combine(binDir, "..");
+string configDir = Path.Combine(rootDir, "configs");
+string pluginsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins");
 
-if (coreConfig is null)
-{
-    Console.WriteLine("[Error] Failed to load core configuration.");
-    return;
-}
+MilkyConfig milkyConfig = ConfigSerializer.LoadConfig<MilkyConfig>(
+    Path.Combine(configDir, "core.json")
+);
 
-// OneBotAdapter onebot = new(coreConfig);
-MilkyAdapter onebot = new(coreConfig);
+MilkyAdapter milky = new(milkyConfig);
+await milky.StartAsync();
 
-await onebot.StartAsync();
-
-var pluginsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins");
 if (Directory.Exists(pluginsDir))
 {
     foreach (var dir in Directory.GetDirectories(pluginsDir))
@@ -34,7 +29,6 @@ if (Directory.Exists(pluginsDir))
                     .Where(t =>
                         typeof(IPlugin).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract
                     );
-
                 foreach (var type in pluginTypes)
                 {
                     if (Activator.CreateInstance(type) is IPlugin plugin)
@@ -42,8 +36,8 @@ if (Directory.Exists(pluginsDir))
                         Console.WriteLine(
                             $"[System] Loaded plugin: {plugin.Name} {plugin.Version}"
                         );
-                        plugin.Initialize();
-                        plugin.Subscribe(onebot);
+                        plugin.Initialize(configDir);
+                        plugin.Subscribe(milky);
                         plugin.Enable();
                     }
                 }
@@ -57,4 +51,3 @@ if (Directory.Exists(pluginsDir))
 }
 
 await Task.Delay(-1);
-await onebot.StopAsync();

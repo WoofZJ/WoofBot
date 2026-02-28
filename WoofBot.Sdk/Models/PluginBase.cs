@@ -1,5 +1,5 @@
-using System.Text.Json;
 using WoofBot.Sdk.Interfaces;
+using WoofBot.Sdk.Serialization;
 
 namespace WoofBot.Sdk.Models;
 
@@ -15,46 +15,18 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
     protected List<IAdapter> Adapters { get; private set; } = [];
     protected bool IsEnabled { get; private set; } = false;
     protected TConfig Config { get; private set; } = new();
+    protected string _configPath = "";
     private readonly List<ScheduledTask> _scheduledTasks = [];
 
-    public virtual void WriteConfig()
+    public virtual void Initialize(string configDir)
     {
-        var configPath = $"configs/{Name.ToLower()}.json";
-        var options = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        };
-        string json = JsonSerializer.Serialize(Config, options);
-        File.WriteAllText(configPath, json);
+        _configPath = Path.Combine(configDir, $"{Name.ToLower()}.json");
+        Config = ConfigSerializer.LoadConfig<TConfig>(_configPath);
     }
 
-    public virtual void LoadConfig()
+    public virtual void UpdateConfig()
     {
-        var configPath = $"configs/{Name.ToLower()}.json";
-        if (!File.Exists(configPath))
-        {
-            Config = new TConfig();
-            WriteConfig();
-        }
-        try
-        {
-            string json = File.ReadAllText(configPath);
-            var options = new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-            };
-            Config = JsonSerializer.Deserialize<TConfig>(json, options) ?? new TConfig();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[Error] Failed to load config for {Name}: {ex.Message}");
-        }
-    }
-
-    public virtual void Initialize()
-    {
-        LoadConfig();
+        ConfigSerializer.SaveConfig(_configPath, Config);
     }
 
     public virtual void Subscribe(IAdapter adapter)

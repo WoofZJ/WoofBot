@@ -2,7 +2,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WoofBot.Sdk\WoofBot.Sdk.csproj" />
-    <ProjectReference Include="..\adapters\WoofBot.Adapters.OneBot\WoofBot.Adapters.OneBot.csproj" />
     <ProjectReference Include="..\adapters\WoofBot.Adapters.Milky\WoofBot.Adapters.Milky.csproj" />
   </ItemGroup>
 
