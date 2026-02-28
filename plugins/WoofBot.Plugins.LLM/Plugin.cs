@@ -1,19 +1,19 @@
-﻿using WoofBot.Sdk.Interfaces;
-using WoofBot.Sdk.Models;
-using OpenAI;
-using System.ClientModel;
-using OpenAI.Chat;
-using Microsoft.Agents.AI;
-using System.Text;
-using System.ComponentModel;
-using Microsoft.Extensions.AI;
-using System.Text.Json;
-using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
-using OpenAI.Responses;
-using System.Net.Http.Json;
+﻿using System.ClientModel;
 using System.Collections.Concurrent;
-using System.Threading;
 using System.Collections.Frozen;
+using System.ComponentModel;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using OpenAI;
+using OpenAI.Chat;
+using OpenAI.Responses;
+using WoofBot.Sdk.Interfaces;
+using WoofBot.Sdk.Models;
+using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 namespace WoofBot.Plugins.LLM;
 
@@ -36,46 +36,59 @@ public record LLMPluginConfig
 [Description("你应该遵循的响应格式")]
 public record LLMResponse
 {
-    [Description("是否需要发送回复消息。你处在群聊中，不是所有消息都需要回复，你应该只对明确提及到你的消息进行回复，只有在需要回复的时候才将此字段设为 true。")]
+    [Description(
+        "是否需要发送回复消息。你处在群聊中，不是所有消息都需要回复，你应该只对明确提及到你的消息进行回复，只有在需要回复的时候才将此字段设为 true。"
+    )]
     public bool NeedResponse { get; init; } = false;
-    [Description("要发送回去的文本消息。你可以将长消息拆分成多部分，每部分会依次发送。不要拆分成太多部分以避免刷屏。")]
+
+    [Description(
+        "要发送回去的文本消息。你可以将长消息拆分成多部分，每部分会依次发送。不要拆分成太多部分以避免刷屏。"
+    )]
     public List<string> TextMessage { get; init; } = [];
+
     [Description("要发送回去的图片消息 URL。")]
     public string ImageMessageUrl { get; init; } = string.Empty;
+
     [Description("要发送回去的视频消息任务 ID。")]
     public string VideoTaskId { get; init; } = string.Empty;
 }
 
 public class LLMPlugin : PluginBase<LLMPluginConfig>
 {
-    public LLMPlugin() : base("LLM", "1.0", "A simple LLM plugin") {}
+    public LLMPlugin()
+        : base("LLM", "1.0", "A simple LLM plugin") { }
 
     private ChatClientAgent? _agent;
     private Dictionary<string, AgentThread> _agentThreads = [];
     private HashSet<string> _activeSessions = [];
     private readonly ConcurrentDictionary<string, DateTime> _sessionLastActiveTime = new(); // Session timeout tracking
-    
+
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounceCts = new();
-    private readonly ConcurrentDictionary<string, ConcurrentQueue<ChatMessage>> _pendingMessages = new();
+    private readonly ConcurrentDictionary<string, ConcurrentQueue<ChatMessage>> _pendingMessages =
+        new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _groupLocks = new();
     private Timer _videoQueryTimer;
 
-    public override void Initialize()
+    public override void Initialize(string configDir)
     {
-        base.Initialize();
-        if (string.IsNullOrEmpty(Config.ApiKey)
+        base.Initialize(configDir);
+        if (
+            string.IsNullOrEmpty(Config.ApiKey)
             || string.IsNullOrEmpty(Config.Endpoint)
             || string.IsNullOrEmpty(Config.InstructionsFilePath)
-            || string.IsNullOrEmpty(Config.ModelName))
+            || string.IsNullOrEmpty(Config.ModelName)
+        )
         {
-            Console.WriteLine("LLM Plugin is not properly configured. API key, Endpoint, InstructionsFilePath, or ModelName is missing.");
+            Console.WriteLine(
+                "LLM Plugin is not properly configured. API key, Endpoint, InstructionsFilePath, or ModelName is missing."
+            );
             return;
         }
         var instructions = File.ReadAllText(Config.InstructionsFilePath);
-        OpenAIClient client = new(new ApiKeyCredential(Config.ApiKey), new OpenAIClientOptions
-        {
-            Endpoint = new Uri(Config.Endpoint)
-        });
+        OpenAIClient client = new(
+            new ApiKeyCredential(Config.ApiKey),
+            new OpenAIClientOptions { Endpoint = new Uri(Config.Endpoint) }
+        );
         _agent = client
             .GetChatClient(Config.ModelName)
             .CreateAIAgent(
@@ -85,45 +98,55 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                     ChatOptions = new()
                     {
                         Instructions = instructions,
-                        ResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat.ForJsonSchema<LLMResponse>(),
-                        Tools = [
+                        ResponseFormat =
+                            Microsoft.Extensions.AI.ChatResponseFormat.ForJsonSchema<LLMResponse>(),
+                        Tools =
+                        [
                             AIFunctionFactory.Create(GetCurrentDateTime),
                             AIFunctionFactory.Create(GenerateImage),
                             AIFunctionFactory.Create(EditImage),
-                            AIFunctionFactory.Create(GenerateVideo)
+                            AIFunctionFactory.Create(GenerateVideo),
                         ],
                         RawRepresentationFactory = _ => new ChatCompletionOptions
                         {
-                            #pragma warning disable OPENAI001
+#pragma warning disable OPENAI001
                             ReasoningEffortLevel = "low",
-                            #pragma warning restore OPENAI001
+#pragma warning restore OPENAI001
                         },
                     },
                     ChatMessageStoreFactory = ctx => new InMemoryChatMessageStore(
-                        #pragma warning disable MEAI001
+#pragma warning disable MEAI001
                         new MessageCountingChatReducer(Config.ContextLength),
-                        #pragma warning restore MEAI001
-                        ctx.SerializedState, ctx.JsonSerializerOptions)
+#pragma warning restore MEAI001
+                        ctx.SerializedState,
+                        ctx.JsonSerializerOptions
+                    ),
                 }
             );
     }
 
     protected override async Task HandleEventAsync(Event evt, IAdapter adapter)
     {
-        if (evt is not MessageEvent || _agent is null) return;
+        if (evt is not MessageEvent || _agent is null)
+            return;
         var msgEvt = (MessageEvent)evt;
-        if (msgEvt.Target.Type is not TargetType.Group
-            || !Config.EnabledGroups.Contains(msgEvt.Target.Id))
+        if (
+            msgEvt.Target.Type is not TargetType.Group
+            || !Config.EnabledGroups.Contains(msgEvt.Target.Id)
+        )
             return;
 
         var chatMessage = CreateChatMessage(adapter, msgEvt);
-        var queue = _pendingMessages.GetOrAdd(msgEvt.Target.Id, _ => new ConcurrentQueue<ChatMessage>());
+        var queue = _pendingMessages.GetOrAdd(
+            msgEvt.Target.Id,
+            _ => new ConcurrentQueue<ChatMessage>()
+        );
         queue.Enqueue(chatMessage);
-        
+
         lock (_activeSessions)
         {
             bool isActive = _activeSessions.Contains(msgEvt.Target.Id);
-            
+
             // Check expiry
             if (isActive && _sessionLastActiveTime.TryGetValue(msgEvt.Target.Id, out var lastTime))
             {
@@ -136,16 +159,21 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
             }
 
             // Check activation
-            bool isWakeWord = msgEvt.Messages.Contains(new At(adapter.SelfId)) || 
-                              msgEvt.Messages.Any(m => m is Text text && Config.WakeWords.Any(ww => text.Content.Contains(ww)));
-                              
+            bool isWakeWord =
+                msgEvt.Messages.Contains(new At(adapter.SelfId))
+                || msgEvt.Messages.Any(m =>
+                    m is Text text && Config.WakeWords.Any(ww => text.Content.Contains(ww))
+                );
+
             if (isWakeWord)
             {
                 if (!isActive)
                 {
                     _activeSessions.Add(msgEvt.Target.Id);
                     isActive = true;
-                    Console.WriteLine($"[LLMPlugin] Activated session for group {msgEvt.Target.Id}");
+                    Console.WriteLine(
+                        $"[LLMPlugin] Activated session for group {msgEvt.Target.Id}"
+                    );
                 }
             }
 
@@ -170,7 +198,11 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         await Task.CompletedTask;
     }
 
-    private async Task ProcessDebounceAsync(Target target, IAdapter adapter, CancellationToken token)
+    private async Task ProcessDebounceAsync(
+        Target target,
+        IAdapter adapter,
+        CancellationToken token
+    )
     {
         try
         {
@@ -181,14 +213,16 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
             return;
         }
 
-        if (token.IsCancellationRequested) return;
+        if (token.IsCancellationRequested)
+            return;
 
         var semaphore = _groupLocks.GetOrAdd(target.Id, _ => new SemaphoreSlim(1, 1));
         await semaphore.WaitAsync();
 
         try
         {
-            if (token.IsCancellationRequested) return;
+            if (token.IsCancellationRequested)
+                return;
 
             if (!_agentThreads.TryGetValue(target.Id, out AgentThread? thread))
             {
@@ -202,7 +236,9 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                 while (queue.TryDequeue(out var msg))
                 {
                     history?.Add(msg);
-                    Console.WriteLine($"[Debounce] Flushed message to thread history. Queue count: {queue.Count}");
+                    Console.WriteLine(
+                        $"[Debounce] Flushed message to thread history. Queue count: {queue.Count}"
+                    );
                 }
             }
 
@@ -218,15 +254,12 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                 var response = await _agent!.RunAsync<LLMResponse>(thread);
                 var llmResponse = response.Deserialize<LLMResponse>(JsonSerializerOptions.Web);
                 Console.WriteLine(llmResponse);
-                
+
                 if (llmResponse.NeedResponse)
                 {
                     foreach (var textMsg in llmResponse.TextMessage)
                     {
-                        await adapter.SendMessageAsync(
-                            target,
-                            [new Text(textMsg)]
-                        );
+                        await adapter.SendMessageAsync(target, [new Text(textMsg)]);
                         await Task.Delay(Random.Shared.Next(1500, 4000));
                     }
                     if (!string.IsNullOrEmpty(llmResponse.ImageMessageUrl))
@@ -238,45 +271,75 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                     }
                     if (!string.IsNullOrEmpty(llmResponse.VideoTaskId))
                     {
-                        _videoQueryTimer = new Timer(async _ =>
-                        {
-                            try
+                        _videoQueryTimer = new Timer(
+                            async _ =>
                             {
-                                using var httpClient = new HttpClient();
-                                httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
-                                var statusResponse = await httpClient.GetAsync($"{Config.ImageEndpoint}/contents/generations/tasks/{llmResponse.VideoTaskId}");
-                                statusResponse.EnsureSuccessStatusCode();
-                                var statusJson = await statusResponse.Content.ReadFromJsonAsync<JsonElement>();
-                                Console.WriteLine($"[VideoQuery] Video generation status response: {statusJson}");
-                                if (statusJson.TryGetProperty("status", out var statusProp)
-                                    && statusProp.GetString() == "succeeded")
+                                try
                                 {
-                                    if (statusJson.TryGetProperty("content", out var contentProp) &&
-                                        contentProp.TryGetProperty("video_url", out var videoUrlProp))
-                                    {
-                                        var videoUrl = videoUrlProp.GetString();
-                                        Console.WriteLine($"[VideoQuery] Generated video URL: {videoUrl}");
-                                        await adapter.SendMessageAsync(
-                                            target,
-                                            [new Text("视频生成好啦！")]
+                                    using var httpClient = new HttpClient();
+                                    httpClient.DefaultRequestHeaders.Authorization =
+                                        new System.Net.Http.Headers.AuthenticationHeaderValue(
+                                            "Bearer",
+                                            Config.ImageApiKey
                                         );
-                                        await adapter.SendMessageAsync(
-                                            target,
-                                            [new Video(videoUrl ?? "")]
-                                        );
-                                    }
-                                    else
+                                    var statusResponse = await httpClient.GetAsync(
+                                        $"{Config.ImageEndpoint}/contents/generations/tasks/{llmResponse.VideoTaskId}"
+                                    );
+                                    statusResponse.EnsureSuccessStatusCode();
+                                    var statusJson =
+                                        await statusResponse.Content.ReadFromJsonAsync<JsonElement>();
+                                    Console.WriteLine(
+                                        $"[VideoQuery] Video generation status response: {statusJson}"
+                                    );
+                                    if (
+                                        statusJson.TryGetProperty("status", out var statusProp)
+                                        && statusProp.GetString() == "succeeded"
+                                    )
                                     {
-                                        Console.WriteLine($"[VideoQuery] Video URL not found in content.");
+                                        if (
+                                            statusJson.TryGetProperty(
+                                                "content",
+                                                out var contentProp
+                                            )
+                                            && contentProp.TryGetProperty(
+                                                "video_url",
+                                                out var videoUrlProp
+                                            )
+                                        )
+                                        {
+                                            var videoUrl = videoUrlProp.GetString();
+                                            Console.WriteLine(
+                                                $"[VideoQuery] Generated video URL: {videoUrl}"
+                                            );
+                                            await adapter.SendMessageAsync(
+                                                target,
+                                                [new Text("视频生成好啦！")]
+                                            );
+                                            await adapter.SendMessageAsync(
+                                                target,
+                                                [new Video(videoUrl ?? "")]
+                                            );
+                                        }
+                                        else
+                                        {
+                                            Console.WriteLine(
+                                                $"[VideoQuery] Video URL not found in content."
+                                            );
+                                        }
+                                        _videoQueryTimer?.Dispose();
                                     }
-                                    _videoQueryTimer?.Dispose();
                                 }
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"[VideoQuery] Error querying video generation status: {ex}");
-                            }
-                        }, null, 1000, 20000);
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine(
+                                        $"[VideoQuery] Error querying video generation status: {ex}"
+                                    );
+                                }
+                            },
+                            null,
+                            1000,
+                            20000
+                        );
                     }
                 }
             }
@@ -303,7 +366,11 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                     sb.Append(text.Content);
                     break;
                 case At at:
-                    sb.Append(at.Target == adapter.SelfId ? $"@({Config.WakeWords.First()})" : $"@({at.Target})");
+                    sb.Append(
+                        at.Target == adapter.SelfId
+                            ? $"@({Config.WakeWords.First()})"
+                            : $"@({at.Target})"
+                    );
                     break;
                 case ImageRecv img:
                     if (img.FileSize <= 4 * 1024 * 1024)
@@ -338,14 +405,18 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
 
     [Description("Generate an image based on the given prompt. Returns the image URL.")]
     private async Task<string> GenerateImage(
-        [Description("The prompt describing the image to generate. You can describe the style, content, colors, and other details of the image you want.")]
-        string prompt)
+        [Description(
+            "The prompt describing the image to generate. You can describe the style, content, colors, and other details of the image you want."
+        )]
+            string prompt
+    )
     {
         try
         {
             Console.WriteLine($"Generating image with prompt: {prompt}");
             using var httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
+            httpClient.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
 
             var requestBody = new
             {
@@ -355,9 +426,12 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                 response_format = "url",
                 size = "2K",
                 stream = false,
-                watermark = true
+                watermark = true,
             };
-            var response = await httpClient.PostAsJsonAsync($"{Config.ImageEndpoint}/images/generations", requestBody);
+            var response = await httpClient.PostAsJsonAsync(
+                $"{Config.ImageEndpoint}/images/generations",
+                requestBody
+            );
             response.EnsureSuccessStatusCode();
 
             var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -378,16 +452,16 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
 
     [Description("Edit an existing image based on the given prompt. Returns the edited image URL.")]
     private async Task<string> EditImage(
-        [Description("The URL of the image to be edited.")]
-        string imageUrl,
-        [Description("The prompt describing the edits to be made to the image.")]
-        string prompt)
+        [Description("The URL of the image to be edited.")] string imageUrl,
+        [Description("The prompt describing the edits to be made to the image.")] string prompt
+    )
     {
         try
         {
             Console.WriteLine($"Editing image {imageUrl} with prompt: {prompt}");
             using var httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
+            httpClient.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
 
             var requestBody = new
             {
@@ -398,10 +472,13 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                 response_format = "url",
                 size = "2K",
                 stream = false,
-                watermark = true
+                watermark = true,
             };
 
-            var response = await httpClient.PostAsJsonAsync($"{Config.ImageEndpoint}/images/generations", requestBody);
+            var response = await httpClient.PostAsJsonAsync(
+                $"{Config.ImageEndpoint}/images/generations",
+                requestBody
+            );
             response.EnsureSuccessStatusCode();
 
             var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -421,43 +498,35 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         }
     }
 
-    [Description("Generate a video based on the given prompt. Returns the video task id. Tell the user the video is being generated and they can wait for a while.")]
+    [Description(
+        "Generate a video based on the given prompt. Returns the video task id. Tell the user the video is being generated and they can wait for a while."
+    )]
     private async Task<string> GenerateVideo(
-        [Description("The prompt describing the video to generate.")]
-        string prompt,
-        [Description("The URL of the image to be used as a reference for video generation. Set it as empty string if not used.")]
-        string ImageUrl)
+        [Description("The prompt describing the video to generate.")] string prompt,
+        [Description(
+            "The URL of the image to be used as a reference for video generation. Set it as empty string if not used."
+        )]
+            string ImageUrl
+    )
     {
         try
         {
             Console.WriteLine($"Generating video with prompt: {prompt}");
             using var httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
+            httpClient.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
 
-            List<object> contentList = new()
-            {
-                new {
-                    @type = "text",
-                    text = prompt
-                },
-            };
+            List<object> contentList = new() { new { @type = "text", text = prompt } };
             if (!string.IsNullOrEmpty(ImageUrl))
             {
-                contentList.Add(new {
-                    @type = "image_url",
-                    image_url = new
-                    {
-                        url = ImageUrl
-                    }
-                });
+                contentList.Add(new { @type = "image_url", image_url = new { url = ImageUrl } });
             }
-            var requestBody = new
-            {
-                model = Config.VideoModel,
-                content = contentList
-            };
+            var requestBody = new { model = Config.VideoModel, content = contentList };
 
-            var response = await httpClient.PostAsJsonAsync($"{Config.ImageEndpoint}/contents/generations/tasks", requestBody);
+            var response = await httpClient.PostAsJsonAsync(
+                $"{Config.ImageEndpoint}/contents/generations/tasks",
+                requestBody
+            );
             response.EnsureSuccessStatusCode();
 
             var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -476,4 +545,3 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         }
     }
 }
-

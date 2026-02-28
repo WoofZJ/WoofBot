@@ -8,6 +8,5 @@
     <Project Path="plugins/WoofBot.Plugins.BiliBili/WoofBot.Plugins.BiliBili.csproj" />
     <Project Path="plugins/WoofBot.Plugins.LLM/WoofBot.Plugins.LLM.csproj" />
     <Project Path="plugins/WoofBot.Plugins.Ping/WoofBot.Plugins.Ping.csproj" />
-    <Project Path="plugins/WoofBot.Plugins.Record/WoofBot.Plugins.Record.csproj" />
   </Folder>
 </Solution>
