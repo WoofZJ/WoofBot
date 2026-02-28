@@ -7,11 +7,7 @@ $Root = Resolve-Path "$PSScriptRoot/.."
 $CoreProject = "$Root/WoofBot.Core/WoofBot.Core.csproj"
 $PluginProjects = Get-ChildItem "$Root/plugins" -Recurse -Filter "*.csproj"
 
-# Clean build directory
 $BuildRoot = "$Root/build"
-if (Test-Path $BuildRoot) {
-    Remove-Item $BuildRoot -Recurse -Force
-}
 
 Write-Host "=== Building WoofBot.Core ===" -ForegroundColor Cyan
 dotnet build $CoreProject -c Release -o "$BuildRoot/bin"
