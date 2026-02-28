@@ -6,7 +6,7 @@ public interface IPlugin
     string Version { get; }
     string Description { get; }
 
-    void Initialize();
+    void Initialize(string configDir);
     void Subscribe(IAdapter adapter);
     void Enable();
     void Disable();

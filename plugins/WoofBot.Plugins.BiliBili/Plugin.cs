@@ -81,7 +81,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 sb.AppendLine($"- 转发：{first.Forwards}");
                 messages.Add([new Text(sb.ToString().TrimEnd())]);
                 Config.LastPubTimes[userId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                WriteConfig();
+                UpdateConfig();
             }
             result[userId] = messages;
         }
@@ -148,8 +148,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     if (!entry.UserIds.Contains(uid))
                     {
                         entry.UserIds.Add(uid);
-                        WriteConfig();
-                        LoadConfig();
+                        UpdateConfig();
                         await adapter.SendMessageAsync(
                             new Target(TargetType.Group, msgEvt.Target.Id),
                             [new Text($"已订阅用户 {uid} 的动态~")]
@@ -182,8 +181,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     if (entry is not null && entry.UserIds.Contains(uid))
                     {
                         entry.UserIds.Remove(uid);
-                        WriteConfig();
-                        LoadConfig();
+                        UpdateConfig();
                         await adapter.SendMessageAsync(
                             new Target(TargetType.Group, msgEvt.Target.Id),
                             [new Text($"已取消订阅用户 {uid} 的动态~")]
