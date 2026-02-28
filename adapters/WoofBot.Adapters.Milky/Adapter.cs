@@ -3,11 +3,15 @@ using Milky.Net.Model;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Models;
 using Event = WoofBot.Sdk.Models.Event;
-using MilkyEvent = Milky.Net.Model.Event;
 
 namespace WoofBot.Adapters.Milky;
 
-public record MilkyConfig(string Host, int Port, string Token);
+public record MilkyConfig
+{
+    public string Host { get; set; } = "";
+    public int Port { get; set; }
+    public string Token { get; set; } = "";
+}
 
 public class MilkyAdapter(MilkyConfig config) : IAdapter
 {

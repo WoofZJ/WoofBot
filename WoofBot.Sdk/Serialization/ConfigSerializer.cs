@@ -27,7 +27,6 @@ public static class ConfigSerializer
             }
             T defaultConfig = Activator.CreateInstance<T>();
             SaveConfig(path, defaultConfig);
-            return default!;
         }
         string json = File.ReadAllText(path);
         return JsonSerializer.Deserialize<T>(json, s_readOptions)!;
