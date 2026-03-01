@@ -32,4 +32,6 @@ public record Face(int Id) : MessageSegment;
 
 public record Sticker(int PackageId, string EmojiId, string Key) : MessageSegment;
 
+public record LightApp(string AppId, string Title, string Description, string Url) : MessageSegment;
+
 public class Messages : List<MessageSegment> { }

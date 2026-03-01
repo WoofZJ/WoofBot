@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Milky.Net.Model;
 using WoofModels = WoofBot.Sdk.Models;
 
@@ -12,39 +14,61 @@ public static class MilkyMapper
             WoofModels.Messages messages = [];
             foreach (var segment in segments)
             {
-                messages.Add(
-                    segment switch
-                    {
-                        IncomingSegment<TextIncomingSegmentData> textSegment => new WoofModels.Text(
-                            textSegment.Data.Text
-                        ),
-                        IncomingSegment<ImageIncomingSegmentData> imageSegment =>
+                switch (segment)
+                {
+                    case IncomingSegment<TextIncomingSegmentData> textSegment:
+                        messages.Add(new WoofModels.Text(textSegment.Data.Text));
+                        break;
+                    case IncomingSegment<ImageIncomingSegmentData> imageSegment:
+                        messages.Add(
                             new WoofModels.ImageRecv(
                                 imageSegment.Data.ResourceId,
                                 imageSegment.Data.TempUrl,
                                 imageSegment.Data.Width,
                                 imageSegment.Data.Height,
                                 null
-                            ),
-                        IncomingSegment<MentionIncomingSegmentData> atSegment => new WoofModels.At(
-                            atSegment.Data.UserId.ToString()
-                        ),
-                        IncomingSegment<MentionAllIncomingSegmentData> atAllSegment =>
-                            new WoofModels.At("all"),
-                        IncomingSegment<ReplyIncomingSegmentData> replySegment =>
-                            new WoofModels.Reply(replySegment.Data.MessageSeq),
-                        IncomingSegment<FaceIncomingSegmentData> faceSegment => new WoofModels.Face(
-                            int.Parse(faceSegment.Data.FaceId)
-                        ),
-                        IncomingSegment<MarketFaceIncomingSegmentData> marketFaceSegment =>
+                            )
+                        );
+                        break;
+                    case IncomingSegment<MentionIncomingSegmentData> atSegment:
+                        messages.Add(new WoofModels.At(atSegment.Data.UserId.ToString()));
+                        break;
+                    case IncomingSegment<MentionAllIncomingSegmentData> atAllSegment:
+                        messages.Add(new WoofModels.At("all"));
+                        break;
+                    case IncomingSegment<ReplyIncomingSegmentData> replySegment:
+                        messages.Add(new WoofModels.Reply(replySegment.Data.MessageSeq));
+                        break;
+                    case IncomingSegment<FaceIncomingSegmentData> faceSegment:
+                        messages.Add(new WoofModels.Face(int.Parse(faceSegment.Data.FaceId)));
+                        break;
+                    case IncomingSegment<MarketFaceIncomingSegmentData> marketFaceSegment:
+                        messages.Add(
                             new WoofModels.Sticker(
                                 marketFaceSegment.Data.EmojiPackageId,
                                 marketFaceSegment.Data.EmojiId,
                                 marketFaceSegment.Data.Key
-                            ),
-                        _ => new WoofModels.UnSupportedSegment(),
-                    }
-                );
+                            )
+                        );
+                        break;
+                    case IncomingSegment<LightAppIncomingSegmentData> lightAppSegment:
+                        JsonNode node = JsonSerializer.Deserialize<JsonNode>(
+                            lightAppSegment.Data.JsonPayload
+                        )!;
+                        node = node["meta"]["detail_1"];
+                        messages.Add(
+                            new WoofModels.LightApp(
+                                node["appid"].GetValue<string>(),
+                                node["title"].GetValue<string>(),
+                                node["desc"].GetValue<string>(),
+                                node["qqdocurl"].GetValue<string>()
+                            )
+                        );
+                        break;
+                    default:
+                        messages.Add(new WoofModels.UnSupportedSegment());
+                        break;
+                }
             }
             return messages;
         }
