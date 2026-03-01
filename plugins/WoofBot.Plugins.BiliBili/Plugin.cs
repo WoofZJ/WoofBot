@@ -61,17 +61,29 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
 
     async Task<string?> GetVideoInfoImageAsync(long userId)
     {
-        var response = await _httpClient.SendAsync(
-            new HttpRequestMessage(
-                HttpMethod.Get,
-                Config.RequestUrl.TrimEnd('/') + $"/video/latest/image?user_id={userId}"
-            )
+        var response = await _httpClient.GetAsync(
+            Config.RequestUrl.TrimEnd('/') + $"/video/latest/image?user_id={userId}"
         );
         if (!response.IsSuccessStatusCode)
             return null;
         var imageBytes = await response.Content.ReadAsByteArrayAsync();
         string base64String = Convert.ToBase64String(imageBytes);
         return $"base64://{base64String}";
+    }
+
+    async Task<UserIdInfo?> GetUserIdByName(string username)
+    {
+        var response = await _httpClient.GetAsync(
+            Config.RequestUrl.TrimEnd('/') + $"/user/id?username={Uri.EscapeDataString(username)}"
+        );
+        if (!response.IsSuccessStatusCode)
+            return null;
+        var json = await response.Content.ReadAsStringAsync();
+        var result = JsonSerializer.Deserialize<UserIdInfo>(
+            json,
+            new JsonSerializerOptions() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }
+        );
+        return result;
     }
 
     async Task<Dictionary<long, List<Messages>>> UpdateSubscribe(HashSet<long> userIds)
@@ -150,6 +162,69 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         }
     }
 
+    private async Task<string> SubscribeUp(string groupId, string username)
+    {
+        UserIdInfo? userInfo = await GetUserIdByName(username);
+        if (userInfo is null)
+            return "找不到该up哦~";
+        if (userInfo.Fans < 10000)
+            return $"「{userInfo.Username}」的粉丝不足1万哦~是不是输错了？";
+        var entry = Config.Subscriptions.FirstOrDefault(e => e.GroupId == groupId);
+        if (entry is null)
+        {
+            entry = new SubscribeEntry { GroupId = groupId };
+            Config.Subscriptions.Add(entry);
+        }
+        if (!entry.UserIds.Contains(userInfo.UserId))
+        {
+            entry.UserIds.Add(userInfo.UserId);
+            if (!Config.LastPubTimes.ContainsKey(userInfo.UserId))
+            {
+                Config.LastPubTimes[userInfo.UserId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            }
+            UpdateConfig();
+            if (userInfo.Username != username)
+            {
+                return $"检测到相似up主「{userInfo.Username}」({userInfo.Fans}粉丝)，已自动切换为订阅该up的视频~";
+            }
+            return $"已订阅up「{userInfo.Username}」的视频~";
+        }
+        else
+        {
+            if (userInfo.Username != username)
+            {
+                return $"检测到相似up主「{userInfo.Username}」({userInfo.Fans}粉丝)，该up已经订阅过了哦~";
+            }
+            return $"up「{userInfo.Username}」已经订阅过了哦~";
+        }
+    }
+
+    private async Task<string> UnsubscribeUp(string groupId, string username)
+    {
+        UserIdInfo? userInfo = await GetUserIdByName(username);
+        if (userInfo is null)
+            return "找不到该up哦~";
+        var entry = Config.Subscriptions.FirstOrDefault(e => e.GroupId == groupId);
+        if (entry is not null && entry.UserIds.Contains(userInfo.UserId))
+        {
+            entry.UserIds.Remove(userInfo.UserId);
+            UpdateConfig();
+            if (userInfo.Username != username)
+            {
+                return $"检测到相似up主「{userInfo.Username}」({userInfo.Fans}粉丝)，已自动切换为取消订阅该up的视频~";
+            }
+            return $"已取消订阅up「{userInfo.Username}」的视频~";
+        }
+        else
+        {
+            if (userInfo.Username != username)
+            {
+                return $"检测到相似up主「{userInfo.Username}」，但该up并没有订阅过哦~";
+            }
+            return $"up「{userInfo.Username}」并没有订阅过哦~";
+        }
+    }
+
     protected override async Task HandleEventAsync(Event evt, IAdapter adapter)
     {
         if (
@@ -161,74 +236,21 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         {
             if (text.Content.StartsWith("订阅up"))
             {
-                string userId = text.Content["订阅up".Length..].Trim();
-                if (long.TryParse(userId, out long uid))
-                {
-                    var entry = Config.Subscriptions.FirstOrDefault(e =>
-                        e.GroupId == msgEvt.Target.Id
-                    );
-                    if (entry is null)
-                    {
-                        entry = new SubscribeEntry { GroupId = msgEvt.Target.Id };
-                        Config.Subscriptions.Add(entry);
-                    }
-                    if (!entry.UserIds.Contains(uid))
-                    {
-                        entry.UserIds.Add(uid);
-                        UpdateConfig();
-                        await adapter.SendMessageAsync(
-                            new Target(TargetType.Group, msgEvt.Target.Id),
-                            [new Text($"已订阅用户 {uid} 的动态~")]
-                        );
-                    }
-                    else
-                    {
-                        await adapter.SendMessageAsync(
-                            new Target(TargetType.Group, msgEvt.Target.Id),
-                            [new Text($"用户 {uid} 已经订阅过了~")]
-                        );
-                    }
-                }
-                else
-                {
-                    await adapter.SendMessageAsync(
-                        new Target(TargetType.Group, msgEvt.Target.Id),
-                        [new Text($"用户ID应该是纯数字哦~")]
-                    );
-                }
+                string username = text.Content["订阅up".Length..].Trim();
+                string result = await SubscribeUp(msgEvt.Target.Id, username);
+                await adapter.SendMessageAsync(
+                    new Target(TargetType.Group, msgEvt.Target.Id),
+                    [new Text(result)]
+                );
             }
             else if (text.Content.StartsWith("取消订阅up"))
             {
-                string userId = text.Content["取消订阅up".Length..].Trim();
-                if (long.TryParse(userId, out long uid))
-                {
-                    var entry = Config.Subscriptions.FirstOrDefault(e =>
-                        e.GroupId == msgEvt.Target.Id
-                    );
-                    if (entry is not null && entry.UserIds.Contains(uid))
-                    {
-                        entry.UserIds.Remove(uid);
-                        UpdateConfig();
-                        await adapter.SendMessageAsync(
-                            new Target(TargetType.Group, msgEvt.Target.Id),
-                            [new Text($"已取消订阅用户 {uid} 的动态~")]
-                        );
-                    }
-                    else
-                    {
-                        await adapter.SendMessageAsync(
-                            new Target(TargetType.Group, msgEvt.Target.Id),
-                            [new Text($"用户 {uid} 没有订阅过哦~")]
-                        );
-                    }
-                }
-                else
-                {
-                    await adapter.SendMessageAsync(
-                        new Target(TargetType.Group, msgEvt.Target.Id),
-                        [new Text($"用户ID应该是纯数字哦~")]
-                    );
-                }
+                string username = text.Content["取消订阅up".Length..].Trim();
+                string result = await UnsubscribeUp(msgEvt.Target.Id, username);
+                await adapter.SendMessageAsync(
+                    new Target(TargetType.Group, msgEvt.Target.Id),
+                    [new Text(result)]
+                );
             }
             else if (text.Content == "检查订阅更新")
             {

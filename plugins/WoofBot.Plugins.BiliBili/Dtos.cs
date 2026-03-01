@@ -21,3 +21,5 @@ public record VideoInfo(
     int Width,
     int Height
 );
+
+public record UserIdInfo(long UserId, string Username, long Fans);
