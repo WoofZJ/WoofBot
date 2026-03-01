@@ -55,15 +55,28 @@ public static class MilkyMapper
                         JsonNode node = JsonSerializer.Deserialize<JsonNode>(
                             lightAppSegment.Data.JsonPayload
                         )!;
-                        node = node["meta"]["detail_1"];
-                        messages.Add(
-                            new WoofModels.LightApp(
-                                node["appid"].GetValue<string>(),
-                                node["title"].GetValue<string>(),
-                                node["desc"].GetValue<string>(),
-                                node["qqdocurl"].GetValue<string>()
-                            )
-                        );
+                        try
+                        {
+                            node = node["meta"]["detail_1"];
+                            messages.Add(
+                                new WoofModels.LightApp(
+                                    node["appid"].GetValue<string>(),
+                                    node["title"].GetValue<string>(),
+                                    node["desc"].GetValue<string>(),
+                                    node["qqdocurl"].GetValue<string>()
+                                )
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(
+                                "Failed to parse LightApp segment data: "
+                                    + ex.Message
+                                    + "\nRaw data: "
+                                    + lightAppSegment.Data.JsonPayload
+                            );
+                            messages.Add(new WoofModels.UnSupportedSegment());
+                        }
                         break;
                     default:
                         messages.Add(new WoofModels.UnSupportedSegment());
