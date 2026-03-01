@@ -17,6 +17,7 @@ public record BiliBiliPluginConfig
 {
     public List<SubscribeEntry> Subscriptions { get; init; } = [];
     public List<string> Admins { get; init; } = [];
+    public List<string> MonitorGroups { get; init; } = [];
     public int PollIntervalMinutes { get; init; } = 10;
     public string RequestUrl { get; init; } = "";
     public Dictionary<long, long> LastPubTimes { get; init; } = [];
@@ -43,11 +44,8 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
 
     async Task<VideoInfo?> GetVideoInfoAsync(long userId)
     {
-        var response = await _httpClient.SendAsync(
-            new HttpRequestMessage(
-                HttpMethod.Get,
-                Config.RequestUrl.TrimEnd('/') + $"/video/latest?user_id={userId}"
-            )
+        var response = await _httpClient.GetAsync(
+            Config.RequestUrl.TrimEnd('/') + $"/video/latest?user_id={userId}"
         );
         if (!response.IsSuccessStatusCode)
             return null;
@@ -225,6 +223,46 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         }
     }
 
+    private async Task<List<Messages>> ParseLightApp(string shortUrl)
+    {
+        var response = await _httpClient.GetAsync(
+            Config.RequestUrl.TrimEnd('/')
+                + $"/video/info/short_url?short_url={Uri.EscapeDataString(shortUrl)}"
+        );
+        if (!response.IsSuccessStatusCode)
+            return
+            [
+                [new Text("小程序解析失败 ;-;")],
+            ];
+        var json = await response.Content.ReadAsStringAsync();
+        var videoInfo = JsonSerializer.Deserialize<VideoInfo>(
+            json,
+            new JsonSerializerOptions() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }
+        );
+        if (videoInfo is null)
+            return
+            [
+                [new Text("小程序解析失败 ;-;")],
+            ];
+        List<Messages> message = [];
+        var imageResponse = await _httpClient.GetAsync(
+            Config.RequestUrl.TrimEnd('/')
+                + $"/video/info/image?bvid={Uri.EscapeDataString(videoInfo.Bvid)}"
+        );
+        if (imageResponse.IsSuccessStatusCode)
+        {
+            var imageBytes = await imageResponse.Content.ReadAsByteArrayAsync();
+            string base64String = Convert.ToBase64String(imageBytes);
+            message.Add([new Image($"base64://{base64String}")]);
+        }
+        StringBuilder sb = new();
+        sb.AppendLine(videoInfo.Description);
+        sb.AppendLine();
+        sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
+        message.Add([new Text(sb.ToString().TrimEnd())]);
+        return message;
+    }
+
     protected override async Task HandleEventAsync(Event evt, IAdapter adapter)
     {
         if (
@@ -257,8 +295,46 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 var groups = new[] { msgEvt.Target.Id };
                 await DoCheck(groups, adapter);
             }
+            else if (text.Content == "启用b站小程序解析")
+            {
+                if (!Config.MonitorGroups.Contains(msgEvt.Target.Id))
+                {
+                    Config.MonitorGroups.Add(msgEvt.Target.Id);
+                    UpdateConfig();
+                    await adapter.SendMessageAsync(
+                        new Target(TargetType.Group, msgEvt.Target.Id),
+                        [new Text("已启用b站小程序解析~")]
+                    );
+                }
+                else
+                {
+                    await adapter.SendMessageAsync(
+                        new Target(TargetType.Group, msgEvt.Target.Id),
+                        [new Text("已经启用过了哦~")]
+                    );
+                }
+            }
+            else if (text.Content == "禁用b站小程序解析")
+            {
+                if (Config.MonitorGroups.Contains(msgEvt.Target.Id))
+                {
+                    Config.MonitorGroups.Remove(msgEvt.Target.Id);
+                    UpdateConfig();
+                    await adapter.SendMessageAsync(
+                        new Target(TargetType.Group, msgEvt.Target.Id),
+                        [new Text("已禁用b站小程序解析~")]
+                    );
+                }
+                else
+                {
+                    await adapter.SendMessageAsync(
+                        new Target(TargetType.Group, msgEvt.Target.Id),
+                        [new Text("已经禁用过了哦~")]
+                    );
+                }
+            }
         }
-        if (evt is CronEvent cron && cron.TaskName == "bilibili-poll")
+        else if (evt is CronEvent cron && cron.TaskName == "bilibili-poll")
         {
             if (DateTimeOffset.Now.Hour >= 8)
             {
@@ -270,6 +346,26 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 Console.WriteLine(
                     $"scheduled check triggered, but now is {DateTimeOffset.Now}. Skipped."
                 );
+            }
+        }
+        else if (
+            evt is MessageEvent msgEvt2
+            && msgEvt2.Target.Type == TargetType.Group
+            && Config.MonitorGroups.Contains(msgEvt2.Target.Id)
+            && msgEvt2.Messages is [LightApp lightApp]
+        )
+        {
+            if (lightApp.Title == "哔哩哔哩")
+            {
+                List<Messages> messages = await ParseLightApp(lightApp.Url.Split('?')[0]);
+                foreach (var msgs in messages)
+                {
+                    await adapter.SendMessageAsync(
+                        new Target(TargetType.Group, msgEvt2.Target.Id),
+                        msgs
+                    );
+                    await Task.Delay(1000);
+                }
             }
         }
     }
