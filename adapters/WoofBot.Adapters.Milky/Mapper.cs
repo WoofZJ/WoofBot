@@ -57,15 +57,31 @@ public static class MilkyMapper
                         )!;
                         try
                         {
-                            node = node["meta"]["detail_1"];
-                            messages.Add(
-                                new WoofModels.LightApp(
-                                    node["appid"].GetValue<string>(),
-                                    node["title"].GetValue<string>(),
-                                    node["desc"].GetValue<string>(),
-                                    node["qqdocurl"].GetValue<string>()
-                                )
-                            );
+                            var meta = node["meta"];
+                            if (meta?["news"] is not null)
+                            {
+                                node = meta["news"];
+                                messages.Add(
+                                    new WoofModels.LightApp(
+                                        node["desc"].GetValue<string>(),
+                                        node["tag"].GetValue<string>(),
+                                        node["title"].GetValue<string>(),
+                                        node["jumpUrl"].GetValue<string>()
+                                    )
+                                );
+                            }
+                            else if (meta?["detail_1"] is not null)
+                            {
+                                node = meta["detail_1"];
+                                messages.Add(
+                                    new WoofModels.LightApp(
+                                        node["appid"].GetValue<string>(),
+                                        node["title"].GetValue<string>(),
+                                        node["desc"].GetValue<string>(),
+                                        node["qqdocurl"].GetValue<string>()
+                                    )
+                                );
+                            }
                         }
                         catch (Exception ex)
                         {
