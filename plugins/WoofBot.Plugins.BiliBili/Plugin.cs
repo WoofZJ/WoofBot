@@ -256,8 +256,12 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             message.Add([new Image($"base64://{base64String}")]);
         }
         StringBuilder sb = new();
-        sb.AppendLine(videoInfo.Description);
-        sb.AppendLine();
+        string trimmedDescription = videoInfo.Description.Trim(['\r', '\n', ' ', '\t', '-']);
+        if (!string.IsNullOrEmpty(trimmedDescription))
+        {
+            sb.AppendLine(trimmedDescription);
+            sb.AppendLine();
+        }
         sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
         message.Add([new Text(sb.ToString().TrimEnd())]);
         return message;
@@ -355,7 +359,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             && msgEvt2.Messages is [LightApp lightApp]
         )
         {
-            if (lightApp.Title == "哔哩哔哩")
+            if (lightApp.Title == "哔哩哔哩" || lightApp.Title == "哔哩哔哩HD")
             {
                 List<Messages> messages = await ParseLightApp(lightApp.Url.Split('?')[0]);
                 foreach (var msgs in messages)
