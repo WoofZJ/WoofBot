@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Models;
 using WoofBot.Sdk.Serialization;
@@ -113,8 +114,11 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     messages.Add([new Image(image)]);
                 }
                 StringBuilder sb = new();
-                sb.AppendLine(videoInfo.Description);
-                sb.AppendLine();
+                if (!string.IsNullOrEmpty(videoInfo.Description))
+                {
+                    sb.AppendLine(videoInfo.Description);
+                    sb.AppendLine();
+                }
                 sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
                 messages.Add([new Text(sb.ToString().TrimEnd())]);
                 Config.LastPubTimes[userId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -223,18 +227,35 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         }
     }
 
-    private async Task<List<Messages>> ParseLightApp(string shortUrl)
+    private async Task<List<Messages>> ParseBilibiliLink(string url, bool isLightApp)
     {
-        var response = await _httpClient.GetAsync(
-            Config.RequestUrl.TrimEnd('/')
-                + $"/video/info/short_url?short_url={Uri.EscapeDataString(shortUrl)}"
-        );
-        if (!response.IsSuccessStatusCode)
-            return
-            [
-                [new Text("小程序解析失败 ;-;")],
-            ];
-        var json = await response.Content.ReadAsStringAsync();
+        url = url.Split('?')[0];
+        string json;
+        if (url.Contains("b23.tv"))
+        {
+            var response = await _httpClient.GetAsync(
+                Config.RequestUrl.TrimEnd('/')
+                    + $"/video/info/short_url?short_url={Uri.EscapeDataString(url)}"
+            );
+            if (!response.IsSuccessStatusCode)
+                return
+                [
+                    [new Text("链接解析失败 ;-;")],
+                ];
+            json = await response.Content.ReadAsStringAsync();
+        }
+        else
+        {
+            string? bvid = url.Split('/').LastOrDefault(e => e.StartsWith("BV"));
+            if (bvid is null)
+                return
+                [
+                    [new Text("链接解析失败 ;-;")],
+                ];
+            json = await _httpClient.GetStringAsync(
+                Config.RequestUrl.TrimEnd('/') + $"/video/info?bvid={Uri.EscapeDataString(bvid)}"
+            );
+        }
         var videoInfo = JsonSerializer.Deserialize<VideoInfo>(
             json,
             new JsonSerializerOptions() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }
@@ -242,7 +263,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         if (videoInfo is null)
             return
             [
-                [new Text("小程序解析失败 ;-;")],
+                [new Text("视频解析失败 ;-;")],
             ];
         List<Messages> message = [];
         var imageResponse = await _httpClient.GetAsync(
@@ -255,15 +276,14 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             string base64String = Convert.ToBase64String(imageBytes);
             message.Add([new Image($"base64://{base64String}")]);
         }
-        StringBuilder sb = new();
-        string trimmedDescription = videoInfo.Description.Trim(['\r', '\n', ' ', '\t', '-']);
-        if (!string.IsNullOrEmpty(trimmedDescription))
+        if (!string.IsNullOrEmpty(videoInfo.Description))
         {
-            sb.AppendLine(trimmedDescription);
-            sb.AppendLine();
+            message.Add([new Text(videoInfo.Description)]);
         }
-        sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
-        message.Add([new Text(sb.ToString().TrimEnd())]);
+        if (isLightApp)
+        {
+            message.Add([new Text($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}")]);
+        }
         return message;
     }
 
@@ -299,7 +319,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 var groups = new[] { msgEvt.Target.Id };
                 await DoCheck(groups, adapter);
             }
-            else if (text.Content == "启用b站小程序解析")
+            else if (text.Content == "启用b站链接解析")
             {
                 if (!Config.MonitorGroups.Contains(msgEvt.Target.Id))
                 {
@@ -307,18 +327,18 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     UpdateConfig();
                     await adapter.SendMessageAsync(
                         new Target(TargetType.Group, msgEvt.Target.Id),
-                        [new Text("已启用b站小程序解析~")]
+                        [new Text("已启用b站链接解析~")]
                     );
                 }
                 else
                 {
                     await adapter.SendMessageAsync(
                         new Target(TargetType.Group, msgEvt.Target.Id),
-                        [new Text("已经启用过了哦~")]
+                        [new Text("已经启用了哦~")]
                     );
                 }
             }
-            else if (text.Content == "禁用b站小程序解析")
+            else if (text.Content == "禁用b站链接解析")
             {
                 if (Config.MonitorGroups.Contains(msgEvt.Target.Id))
                 {
@@ -326,14 +346,14 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     UpdateConfig();
                     await adapter.SendMessageAsync(
                         new Target(TargetType.Group, msgEvt.Target.Id),
-                        [new Text("已禁用b站小程序解析~")]
+                        [new Text("已禁用b站链接解析~")]
                     );
                 }
                 else
                 {
                     await adapter.SendMessageAsync(
                         new Target(TargetType.Group, msgEvt.Target.Id),
-                        [new Text("已经禁用过了哦~")]
+                        [new Text("已经禁用了哦~")]
                     );
                 }
             }
@@ -352,16 +372,45 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 );
             }
         }
-        else if (
+        if (
             evt is MessageEvent msgEvt2
             && msgEvt2.Target.Type == TargetType.Group
             && Config.MonitorGroups.Contains(msgEvt2.Target.Id)
-            && msgEvt2.Messages is [LightApp lightApp]
         )
         {
-            if (lightApp.Title == "哔哩哔哩" || lightApp.Title == "哔哩哔哩HD")
+            string? url = null;
+            if (
+                msgEvt2.Messages is [LightApp lightApp]
+                && (lightApp.Title == "哔哩哔哩" || lightApp.Title == "哔哩哔哩HD")
+            )
             {
-                List<Messages> messages = await ParseLightApp(lightApp.Url.Split('?')[0]);
+                url = lightApp.Url;
+            }
+            else
+            {
+                foreach (var plainText in msgEvt2.Messages.OfType<Text>())
+                {
+                    if (
+                        plainText.Content.Contains("b23.tv/")
+                        || plainText.Content.Contains("bilibili.com/video/")
+                    )
+                    {
+                        url = Regex
+                            .Match(
+                                plainText.Content,
+                                @"(https?://)?(www\.)?(b23\.tv/[a-zA-Z0-9]+|bilibili\.com/video/[a-zA-Z0-9]+)"
+                            )
+                            .Value;
+                        break;
+                    }
+                }
+            }
+            if (url is not null)
+            {
+                List<Messages> messages = await ParseBilibiliLink(
+                    url,
+                    msgEvt2.Messages is [LightApp]
+                );
                 foreach (var msgs in messages)
                 {
                     await adapter.SendMessageAsync(
@@ -380,7 +429,8 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         RegisterSchedule(
             "bilibili-poll",
             TimeSpan.FromMinutes(Config.PollIntervalMinutes),
-            adapter
+            adapter,
+            TimeSpan.FromSeconds(30)
         );
     }
 }
