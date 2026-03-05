@@ -1,9 +1,8 @@
+using Cronos;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Serialization;
 
 namespace WoofBot.Sdk.Models;
-
-public record ScheduledTask(string Name, TimeSpan Interval, IAdapter Adapter, Timer Timer);
 
 public abstract class PluginBase<TConfig>(string Name, string Version, string Description) : IPlugin
     where TConfig : new()
@@ -16,7 +15,7 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
     protected bool IsEnabled { get; private set; } = false;
     protected TConfig Config { get; private set; } = new();
     protected string _configPath = "";
-    private readonly List<ScheduledTask> _scheduledTasks = [];
+    private readonly Dictionary<string, (CronEvent, Timer)> _scheduledTasks = [];
 
     public virtual void Initialize(string configDir)
     {
@@ -65,29 +64,41 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
     /// <param name="dueTime">Optional initial delay before the first execution. Defaults to the interval value.</param>
     protected void RegisterSchedule(
         string name,
-        TimeSpan interval,
+        string cron,
         IAdapter adapter,
-        TimeSpan? dueTime = null
+        int occurrenceCount = 0
     )
     {
         // Prevent duplicate registrations
-        if (_scheduledTasks.Any(t => t.Name == name && t.Adapter == adapter))
+        if (_scheduledTasks.ContainsKey(name))
         {
-            Console.WriteLine(
-                $"[Scheduler] Task '{name}' already registered for adapter {adapter.Name}, skipping."
-            );
+            Console.WriteLine($"[Scheduler] Task '{name}' already registered, skipping.");
+            return;
+        }
+
+        CronExpression cronExpr = CronExpression.Parse(cron);
+        CronEvent cronEvent = new()
+        {
+            TaskName = name,
+            Cron = cronExpr,
+            CurrentOccurrence = cronExpr.GetNextOccurrence(DateTimeOffset.Now, TimeZoneInfo.Local),
+            MaxOccurrences = occurrenceCount,
+            OccurrenceCount = 1,
+        };
+        if (cronEvent.CurrentOccurrence == null)
+        {
+            Console.WriteLine($"[Scheduler] Invalid cron expression for task '{name}', skipping.");
             return;
         }
 
         var timer = new Timer(
             async _ =>
             {
-                if (!IsEnabled)
-                    return;
+                string name = cronEvent.TaskName;
+                (var cronEvt, var timer) = _scheduledTasks[name];
                 try
                 {
-                    var cronEvent = new CronEvent { TaskName = name };
-                    await HandleEventAsync(cronEvent, adapter);
+                    await HandleEventAsync(cronEvt, adapter);
                 }
                 catch (Exception ex)
                 {
@@ -95,16 +106,47 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
                         $"[Scheduler] Error in task '{name}' on adapter {adapter.Name}: {ex.Message}"
                     );
                 }
+                if (cronEvt.MaxOccurrences > 0 && cronEvt.OccurrenceCount >= cronEvt.MaxOccurrences)
+                {
+                    timer.Dispose();
+                    _scheduledTasks.Remove(name);
+                    Console.WriteLine(
+                        $"[Scheduler] Task '{name}' reached max occurrences and was removed."
+                    );
+                    return;
+                }
+                var next = cronEvt.Cron.GetNextOccurrence(DateTimeOffset.Now, TimeZoneInfo.Local);
+                if (next == null)
+                {
+                    timer.Dispose();
+                    _scheduledTasks.Remove(name);
+                    Console.WriteLine(
+                        $"[Scheduler] No more occurrences for task '{name}', removed."
+                    );
+                    return;
+                }
+                var newCronEvent = cronEvt with
+                {
+                    CurrentOccurrence = next,
+                    OccurrenceCount = cronEvt.OccurrenceCount + 1,
+                };
+                timer.Change(
+                    (int)
+                        newCronEvent
+                            .CurrentOccurrence.Value.Subtract(DateTimeOffset.Now)
+                            .TotalMilliseconds,
+                    Timeout.Infinite
+                );
+                _scheduledTasks[name] = (newCronEvent, timer);
             },
             null,
-            dueTime ?? interval,
-            interval
+            (int)(cronEvent.CurrentOccurrence?.Subtract(DateTimeOffset.Now).TotalMilliseconds ?? 0),
+            Timeout.Infinite
         );
+        _scheduledTasks[name] = (cronEvent, timer);
 
-        var task = new ScheduledTask(name, interval, adapter, timer);
-        _scheduledTasks.Add(task);
         Console.WriteLine(
-            $"[Scheduler] Plugin {Name} registered task '{name}' every {interval} on adapter {adapter.Name}"
+            $"[Scheduler] Plugin {Name} registered task '{name}' on adapter {adapter.Name} with cron '{cron}'"
         );
     }
 
@@ -113,25 +155,23 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
     /// </summary>
     protected void UnregisterSchedule(string name, IAdapter? adapter = null)
     {
-        var toRemove = _scheduledTasks
-            .Where(t => t.Name == name && (adapter is null || t.Adapter == adapter))
-            .ToList();
-
-        foreach (var task in toRemove)
+        if (_scheduledTasks.TryGetValue(name, out var item))
         {
-            task.Timer.Dispose();
-            _scheduledTasks.Remove(task);
-            Console.WriteLine(
-                $"[Scheduler] Plugin {Name} unregistered task '{task.Name}' from adapter {task.Adapter.Name}"
-            );
+            item.Item2.Dispose();
+            _scheduledTasks.Remove(name);
+            Console.WriteLine($"[Scheduler] Unregistered task '{name}'");
+        }
+        else
+        {
+            Console.WriteLine($"[Scheduler] No task named '{name}' found to unregister.");
         }
     }
 
     private void DisposeScheduledTasks()
     {
-        foreach (var task in _scheduledTasks)
+        foreach (var (_, timer) in _scheduledTasks.Values)
         {
-            task.Timer.Dispose();
+            timer.Dispose();
         }
         _scheduledTasks.Clear();
     }

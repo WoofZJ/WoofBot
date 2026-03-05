@@ -1,3 +1,5 @@
+using Cronos;
+
 namespace WoofBot.Sdk.Models;
 
 public abstract record Event
@@ -17,4 +19,8 @@ public record NotifyEvent : Event;
 public record CronEvent : Event
 {
     public string TaskName { get; init; } = string.Empty;
+    public CronExpression Cron { get; init; } = default!;
+    public DateTimeOffset? CurrentOccurrence { get; init; }
+    public int OccurrenceCount { get; init; }
+    public int MaxOccurrences { get; init; }
 }
