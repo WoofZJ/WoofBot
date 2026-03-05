@@ -88,7 +88,9 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
     async Task<Dictionary<long, List<Messages>>> UpdateSubscribe(HashSet<long> userIds)
     {
         Dictionary<long, List<Messages>> result = [];
-        Console.WriteLine($"Checking updates for user IDs: {string.Join(", ", userIds)}");
+        Console.WriteLine(
+            $"[{DateTimeOffset.Now:T}] Checking updates for user IDs: {string.Join(", ", userIds)}"
+        );
         foreach (var userId in userIds)
         {
             List<Messages> messages = [];
@@ -276,13 +278,29 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             string base64String = Convert.ToBase64String(imageBytes);
             message.Add([new Image($"base64://{base64String}")]);
         }
+        var commentsResponse = await _httpClient.GetAsync(
+            Config.RequestUrl.TrimEnd('/')
+                + $"/video/comments/image?bvid={Uri.EscapeDataString(videoInfo.Bvid)}"
+        );
+        if (commentsResponse.IsSuccessStatusCode)
+        {
+            var imageBytes = await commentsResponse.Content.ReadAsByteArrayAsync();
+            string base64String = Convert.ToBase64String(imageBytes);
+            message.Add([new Image($"base64://{base64String}")]);
+        }
+        StringBuilder sb = new();
         if (!string.IsNullOrEmpty(videoInfo.Description))
         {
-            message.Add([new Text(videoInfo.Description)]);
+            sb.AppendLine(videoInfo.Description);
+            sb.AppendLine();
         }
         if (isLightApp)
         {
-            message.Add([new Text($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}")]);
+            sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
+        }
+        if (sb.Length > 0)
+        {
+            message.Add([new Text(sb.ToString().TrimEnd())]);
         }
         return message;
     }
@@ -360,17 +378,8 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         }
         else if (evt is CronEvent cron && cron.TaskName == "bilibili-poll")
         {
-            if (DateTimeOffset.Now.Hour >= 8)
-            {
-                var groups = Config.Subscriptions.Select(e => e.GroupId).ToArray();
-                await DoCheck(groups, adapter);
-            }
-            else
-            {
-                Console.WriteLine(
-                    $"scheduled check triggered, but now is {DateTimeOffset.Now}. Skipped."
-                );
-            }
+            var groups = Config.Subscriptions.Select(e => e.GroupId).ToArray();
+            await DoCheck(groups, adapter);
         }
         if (
             evt is MessageEvent msgEvt2
@@ -426,11 +435,6 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
     public override void Subscribe(IAdapter adapter)
     {
         base.Subscribe(adapter);
-        RegisterSchedule(
-            "bilibili-poll",
-            TimeSpan.FromMinutes(Config.PollIntervalMinutes),
-            adapter,
-            TimeSpan.FromSeconds(30)
-        );
+        RegisterSchedule("bilibili-poll", "10,40 * * * *", adapter);
     }
 }
