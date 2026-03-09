@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using WoofBot.Adapters.Milky;
+using WoofBot.Core;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Serialization;
 
@@ -14,6 +15,8 @@ MilkyConfig milkyConfig = ConfigSerializer.LoadConfig<MilkyConfig>(
 
 MilkyAdapter milky = new(milkyConfig);
 await milky.StartAsync();
+
+using CronScheduler cronScheduler = new();
 
 if (Directory.Exists(pluginsDir))
 {
@@ -36,7 +39,7 @@ if (Directory.Exists(pluginsDir))
                         Console.WriteLine(
                             $"[System] Loaded plugin: {plugin.Name} {plugin.Version}"
                         );
-                        plugin.Initialize(configDir);
+                        plugin.Initialize(configDir, cronScheduler);
                         plugin.Subscribe(milky);
                         plugin.Enable();
                     }

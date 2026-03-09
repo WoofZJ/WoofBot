@@ -1,4 +1,3 @@
-using Cronos;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Serialization;
 
@@ -15,10 +14,11 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
     protected bool IsEnabled { get; private set; } = false;
     protected TConfig Config { get; private set; } = new();
     protected string _configPath = "";
-    private readonly Dictionary<string, (CronEvent, Timer)> _scheduledTasks = [];
+    protected ICronScheduler CronScheduler { get; private set; } = default!;
 
-    public virtual void Initialize(string configDir)
+    public virtual void Initialize(string configDir, ICronScheduler cronScheduler)
     {
+        CronScheduler = cronScheduler;
         _configPath = Path.Combine(configDir, $"{Name.ToLower()}.json");
         Config = ConfigSerializer.LoadConfig<TConfig>(_configPath);
     }
@@ -54,127 +54,42 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
 
     protected abstract Task HandleEventAsync(Event evt, IAdapter adapter);
 
+    #region Cron Scheduler Convenience Methods
+
     /// <summary>
-    /// Register a periodic scheduled task bound to a specific adapter.
-    /// The task fires a <see cref="CronEvent"/> through <see cref="HandleEventAsync"/> at each interval.
+    /// Register a cron job owned by this plugin.
     /// </summary>
-    /// <param name="name">A unique name identifying this scheduled task.</param>
-    /// <param name="interval">The interval between executions.</param>
-    /// <param name="adapter">The adapter this task is bound to.</param>
-    /// <param name="dueTime">Optional initial delay before the first execution. Defaults to the interval value.</param>
+    /// <param name="name">A globally unique name for the job.</param>
+    /// <param name="cronExpression">A standard 5-field cron expression.</param>
+    /// <param name="callback">The async callback to execute on each occurrence.</param>
+    /// <param name="maxOccurrences">Maximum executions (0 = unlimited).</param>
     protected void RegisterSchedule(
         string name,
-        string cron,
-        IAdapter adapter,
-        int occurrenceCount = 0
+        string cronExpression,
+        Func<CancellationToken, Task> callback,
+        int maxOccurrences = 0
     )
     {
-        // Prevent duplicate registrations
-        if (_scheduledTasks.ContainsKey(name))
-        {
-            Console.WriteLine($"[Scheduler] Task '{name}' already registered, skipping.");
-            return;
-        }
-
-        CronExpression cronExpr = CronExpression.Parse(cron);
-        CronEvent cronEvent = new()
-        {
-            TaskName = name,
-            Cron = cronExpr,
-            CurrentOccurrence = cronExpr.GetNextOccurrence(DateTimeOffset.Now, TimeZoneInfo.Local),
-            MaxOccurrences = occurrenceCount,
-            OccurrenceCount = 1,
-        };
-        if (cronEvent.CurrentOccurrence == null)
-        {
-            Console.WriteLine($"[Scheduler] Invalid cron expression for task '{name}', skipping.");
-            return;
-        }
-
-        var timer = new Timer(
-            async _ =>
-            {
-                string name = cronEvent.TaskName;
-                (var cronEvt, var timer) = _scheduledTasks[name];
-                try
-                {
-                    await HandleEventAsync(cronEvt, adapter);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine(
-                        $"[Scheduler] Error in task '{name}' on adapter {adapter.Name}: {ex.Message}"
-                    );
-                }
-                if (cronEvt.MaxOccurrences > 0 && cronEvt.OccurrenceCount >= cronEvt.MaxOccurrences)
-                {
-                    timer.Dispose();
-                    _scheduledTasks.Remove(name);
-                    Console.WriteLine(
-                        $"[Scheduler] Task '{name}' reached max occurrences and was removed."
-                    );
-                    return;
-                }
-                var next = cronEvt.Cron.GetNextOccurrence(DateTimeOffset.Now, TimeZoneInfo.Local);
-                if (next == null)
-                {
-                    timer.Dispose();
-                    _scheduledTasks.Remove(name);
-                    Console.WriteLine(
-                        $"[Scheduler] No more occurrences for task '{name}', removed."
-                    );
-                    return;
-                }
-                var newCronEvent = cronEvt with
-                {
-                    CurrentOccurrence = next,
-                    OccurrenceCount = cronEvt.OccurrenceCount + 1,
-                };
-                timer.Change(
-                    (int)
-                        newCronEvent
-                            .CurrentOccurrence.Value.Subtract(DateTimeOffset.Now)
-                            .TotalMilliseconds,
-                    Timeout.Infinite
-                );
-                _scheduledTasks[name] = (newCronEvent, timer);
-            },
-            null,
-            (int)(cronEvent.CurrentOccurrence?.Subtract(DateTimeOffset.Now).TotalMilliseconds ?? 0),
-            Timeout.Infinite
-        );
-        _scheduledTasks[name] = (cronEvent, timer);
-
-        Console.WriteLine(
-            $"[Scheduler] Plugin {Name} registered task '{name}' on adapter {adapter.Name} with cron '{cron}'"
-        );
+        CronScheduler.Schedule(name, cronExpression, Name, callback, maxOccurrences);
     }
 
-    /// <summary>
-    /// Unregister a scheduled task by name. If adapter is specified, only remove for that adapter.
-    /// </summary>
-    protected void UnregisterSchedule(string name, IAdapter? adapter = null)
-    {
-        if (_scheduledTasks.TryGetValue(name, out var item))
-        {
-            item.Item2.Dispose();
-            _scheduledTasks.Remove(name);
-            Console.WriteLine($"[Scheduler] Unregistered task '{name}'");
-        }
-        else
-        {
-            Console.WriteLine($"[Scheduler] No task named '{name}' found to unregister.");
-        }
-    }
+    /// <summary>Unregister a cron job by name.</summary>
+    protected bool UnregisterSchedule(string name) => CronScheduler.Unschedule(name);
 
-    private void DisposeScheduledTasks()
-    {
-        foreach (var (_, timer) in _scheduledTasks.Values)
-        {
-            timer.Dispose();
-        }
-        _scheduledTasks.Clear();
-    }
+    /// <summary>Change the cron expression of an existing job.</summary>
+    protected bool RescheduleTask(string name, string newCronExpression) =>
+        CronScheduler.Reschedule(name, newCronExpression);
+
+    /// <summary>Pause a running cron job.</summary>
+    protected bool PauseSchedule(string name) => CronScheduler.Pause(name);
+
+    /// <summary>Resume a paused cron job.</summary>
+    protected bool ResumeSchedule(string name) => CronScheduler.Resume(name);
+
+    /// <summary>Get all cron jobs registered by this plugin.</summary>
+    protected IReadOnlyList<CronJobInfo> GetScheduledJobs() => CronScheduler.GetJobs(Name);
+
+    #endregion
 
     public virtual void Enable()
     {
@@ -189,7 +104,11 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
     public virtual void Dispose()
     {
         IsEnabled = false;
-        DisposeScheduledTasks();
+        // Unschedule all jobs owned by this plugin
+        foreach (var job in CronScheduler.GetJobs(Name))
+        {
+            CronScheduler.Unschedule(job.Name);
+        }
         Adapters.Clear();
     }
 }

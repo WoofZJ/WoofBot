@@ -6,7 +6,7 @@ public interface IPlugin
     string Version { get; }
     string Description { get; }
 
-    void Initialize(string configDir);
+    void Initialize(string configDir, ICronScheduler cronScheduler);
     void Subscribe(IAdapter adapter);
     void Enable();
     void Disable();

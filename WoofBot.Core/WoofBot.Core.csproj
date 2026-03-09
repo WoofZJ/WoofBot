@@ -1,6 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Cronos" Version="0.11.1" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\WoofBot.Sdk\WoofBot.Sdk.csproj" />
     <ProjectReference Include="..\adapters\WoofBot.Adapters.Milky\WoofBot.Adapters.Milky.csproj" />
   </ItemGroup>
