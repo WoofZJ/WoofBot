@@ -55,43 +55,47 @@ public static class MilkyMapper
                         JsonNode node = JsonSerializer.Deserialize<JsonNode>(
                             lightAppSegment.Data.JsonPayload
                         )!;
-                        try
+                        if (
+                            node.AsObject().TryGetPropertyValue("meta", out var meta)
+                            && meta is not null
+                        )
                         {
-                            var meta = node["meta"];
-                            if (meta?["news"] is not null)
+                            JsonNode? appId,
+                                title,
+                                desc,
+                                url;
+                            if (
+                                meta.AsObject().TryGetPropertyValue("news", out var news)
+                                && news is not null
+                            )
                             {
-                                node = meta["news"];
-                                messages.Add(
-                                    new WoofModels.LightApp(
-                                        node["desc"].GetValue<string>(),
-                                        node["tag"].GetValue<string>(),
-                                        node["title"].GetValue<string>(),
-                                        node["jumpUrl"].GetValue<string>()
-                                    )
-                                );
+                                news.AsObject().TryGetPropertyValue("desc", out appId);
+                                news.AsObject().TryGetPropertyValue("tag", out title);
+                                news.AsObject().TryGetPropertyValue("title", out desc);
+                                news.AsObject().TryGetPropertyValue("jumpUrl", out url);
                             }
-                            else if (meta?["detail_1"] is not null)
+                            else if (
+                                node.AsObject().TryGetPropertyValue("detail_1", out var detail1)
+                                && detail1 is not null
+                            )
                             {
-                                node = meta["detail_1"];
-                                messages.Add(
-                                    new WoofModels.LightApp(
-                                        node["appid"].GetValue<string>(),
-                                        node["title"].GetValue<string>(),
-                                        node["desc"].GetValue<string>(),
-                                        node["qqdocurl"].GetValue<string>()
-                                    )
-                                );
+                                detail1.AsObject().TryGetPropertyValue("appid", out appId);
+                                detail1.AsObject().TryGetPropertyValue("title", out title);
+                                detail1.AsObject().TryGetPropertyValue("desc", out desc);
+                                detail1.AsObject().TryGetPropertyValue("qqdocurl", out url);
                             }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine(
-                                "Failed to parse LightApp segment data: "
-                                    + ex.Message
-                                    + "\nRaw data: "
-                                    + lightAppSegment.Data.JsonPayload
+                            else
+                            {
+                                break;
+                            }
+                            messages.Add(
+                                new WoofModels.LightApp(
+                                    appId?.GetValue<string>() ?? "",
+                                    title?.GetValue<string>() ?? "",
+                                    desc?.GetValue<string>() ?? "",
+                                    url?.GetValue<string>() ?? ""
+                                )
                             );
-                            messages.Add(new WoofModels.UnSupportedSegment());
                         }
                         break;
                     default:
