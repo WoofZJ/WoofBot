@@ -69,9 +69,9 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _groupLocks = new();
     private Timer _videoQueryTimer;
 
-    public override void Initialize(string configDir)
+    public override void Initialize(string configDir, ICronScheduler cronScheduler)
     {
-        base.Initialize(configDir);
+        base.Initialize(configDir, cronScheduler);
         if (
             string.IsNullOrEmpty(Config.ApiKey)
             || string.IsNullOrEmpty(Config.Endpoint)

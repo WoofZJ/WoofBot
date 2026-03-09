@@ -1,10 +1,8 @@
-﻿using System.Diagnostics;
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Models;
-using WoofBot.Sdk.Serialization;
 
 namespace WoofBot.Plugins.BiliBili;
 
@@ -117,7 +115,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 }
                 StringBuilder sb = new();
                 sb.AppendLine(ProcessDescription(videoInfo.Description));
-                sb.AppendLine($"https://www.bilibili.com/video/{videoInfo.Bvid}");
+                sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
                 messages.Add([new Text(sb.ToString().Trim())]);
                 Config.LastPubTimes[userId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 UpdateConfig();
@@ -379,11 +377,6 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 }
             }
         }
-        else if (evt is CronEvent cron && cron.TaskName == "bilibili-poll")
-        {
-            var groups = Config.Subscriptions.Select(e => e.GroupId).ToArray();
-            await DoCheck(groups, adapter);
-        }
         if (
             evt is MessageEvent msgEvt2
             && msgEvt2.Target.Type == TargetType.Group
@@ -438,6 +431,14 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
     public override void Subscribe(IAdapter adapter)
     {
         base.Subscribe(adapter);
-        RegisterSchedule("bilibili-poll", "10,40 * * * *", adapter);
+        RegisterSchedule(
+            "bilibili-poll",
+            "10,40 * * * *",
+            async (_) =>
+            {
+                var groups = Config.Subscriptions.Select(e => e.GroupId).ToArray();
+                await DoCheck(groups, adapter);
+            }
+        );
     }
 }
