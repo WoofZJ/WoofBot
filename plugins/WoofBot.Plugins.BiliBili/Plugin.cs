@@ -58,16 +58,14 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         return videoInfo;
     }
 
-    async Task<string?> GetVideoInfoImageAsync(long userId)
+    async Task<string?> GetImageAsync(string route)
     {
-        var response = await _httpClient.GetAsync(
-            Config.RequestUrl.TrimEnd('/') + $"/video/latest/image?user_id={userId}"
-        );
+        var response = await _httpClient.GetAsync(Config.RequestUrl.TrimEnd('/') + route);
         if (!response.IsSuccessStatusCode)
             return null;
         var imageBytes = await response.Content.ReadAsByteArrayAsync();
-        string base64String = Convert.ToBase64String(imageBytes);
-        return $"base64://{base64String}";
+        string base64 = Convert.ToBase64String(imageBytes);
+        return $"base64://{base64}";
     }
 
     async Task<UserIdInfo?> GetUserIdByName(string username)
@@ -110,19 +108,17 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                         $"「{videoInfo.AuthorName}」于{TimeSpanToString(DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(videoInfo.PublishTime))}前更新了！"
                     ),
                 ]);
-                string? image = await GetVideoInfoImageAsync(userId);
+                string? image = await GetImageAsync(
+                    "/video/info/image?bvid=" + Uri.EscapeDataString(videoInfo.Bvid)
+                );
                 if (image is not null)
                 {
                     messages.Add([new Image(image)]);
                 }
                 StringBuilder sb = new();
-                if (!string.IsNullOrEmpty(videoInfo.Description))
-                {
-                    sb.AppendLine(videoInfo.Description);
-                    sb.AppendLine();
-                }
-                sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
-                messages.Add([new Text(sb.ToString().TrimEnd())]);
+                sb.AppendLine(ProcessDescription(videoInfo.Description));
+                sb.AppendLine($"https://www.bilibili.com/video/{videoInfo.Bvid}");
+                messages.Add([new Text(sb.ToString().Trim())]);
                 Config.LastPubTimes[userId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 UpdateConfig();
             }
@@ -229,6 +225,23 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         }
     }
 
+    private static string ProcessDescription(string description)
+    {
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            description = description.Trim();
+            if (description.Length >= 200)
+            {
+                return description[..150] + $"...\n（已省略{description.Length - 150}字符）";
+            }
+            else
+            {
+                return description;
+            }
+        }
+        return string.Empty;
+    }
+
     private async Task<List<Messages>> ParseBilibiliLink(string url, bool isLightApp)
     {
         url = url.Split('?')[0];
@@ -268,39 +281,29 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 [new Text("视频解析失败 ;-;")],
             ];
         List<Messages> message = [];
-        var imageResponse = await _httpClient.GetAsync(
-            Config.RequestUrl.TrimEnd('/')
-                + $"/video/info/image?bvid={Uri.EscapeDataString(videoInfo.Bvid)}"
+        string? image = await GetImageAsync(
+            $"/video/info/image?bvid={Uri.EscapeDataString(videoInfo.Bvid)}"
         );
-        if (imageResponse.IsSuccessStatusCode)
+        if (image is not null)
         {
-            var imageBytes = await imageResponse.Content.ReadAsByteArrayAsync();
-            string base64String = Convert.ToBase64String(imageBytes);
-            message.Add([new Image($"base64://{base64String}")]);
+            message.Add([new Image(image)]);
         }
-        var commentsResponse = await _httpClient.GetAsync(
-            Config.RequestUrl.TrimEnd('/')
-                + $"/video/comments/image?bvid={Uri.EscapeDataString(videoInfo.Bvid)}"
+        image = await GetImageAsync(
+            $"/video/comments/image?bvid={Uri.EscapeDataString(videoInfo.Bvid)}"
         );
-        if (commentsResponse.IsSuccessStatusCode)
+        if (image is not null)
         {
-            var imageBytes = await commentsResponse.Content.ReadAsByteArrayAsync();
-            string base64String = Convert.ToBase64String(imageBytes);
-            message.Add([new Image($"base64://{base64String}")]);
+            message.Add([new Image(image)]);
         }
         StringBuilder sb = new();
-        if (!string.IsNullOrEmpty(videoInfo.Description))
-        {
-            sb.AppendLine(videoInfo.Description);
-            sb.AppendLine();
-        }
+        sb.AppendLine(ProcessDescription(videoInfo.Description));
         if (isLightApp)
         {
             sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
         }
         if (sb.Length > 0)
         {
-            message.Add([new Text(sb.ToString().TrimEnd())]);
+            message.Add([new Text(sb.ToString().Trim())]);
         }
         return message;
     }
