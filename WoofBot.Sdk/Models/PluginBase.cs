@@ -77,7 +77,7 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
     protected bool UnregisterSchedule(string name) => CronScheduler.Unschedule(name);
 
     /// <summary>Change the cron expression of an existing job.</summary>
-    protected bool RescheduleTask(string name, string newCronExpression) =>
+    protected void RescheduleTask(string name, string newCronExpression) =>
         CronScheduler.Reschedule(name, newCronExpression);
 
     /// <summary>Pause a running cron job.</summary>

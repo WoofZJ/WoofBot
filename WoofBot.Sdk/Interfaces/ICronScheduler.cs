@@ -21,14 +21,9 @@ public record CronJobInfo
 public interface ICronScheduler
 {
     /// <summary>
-    /// Register a new cron job. The <paramref name="callback"/> is invoked each
-    /// time the cron expression fires.
+    /// Register a new cron job. Throws on invalid cron expression or duplicate name.
     /// </summary>
-    /// <param name="name">A unique name for the job (must be globally unique).</param>
-    /// <param name="cronExpression">A standard cron expression (5-field).</param>
-    /// <param name="pluginName">The name of the owning plugin.</param>
-    /// <param name="callback">The async callback to execute on each occurrence.</param>
-    /// <param name="maxOccurrences">Maximum number of executions. 0 means unlimited.</param>
+    /// <exception cref="InvalidOperationException">Duplicate name or no future occurrence.</exception>
     void Schedule(
         string name,
         string cronExpression,
@@ -37,16 +32,21 @@ public interface ICronScheduler
         int maxOccurrences = 0
     );
 
-    /// <summary>Remove a job by name.</summary>
+    /// <summary>Remove a job by name. Returns false if not found.</summary>
     bool Unschedule(string name);
 
-    /// <summary>Change the cron expression of an existing job.</summary>
-    bool Reschedule(string name, string newCronExpression);
+    /// <summary>
+    /// Change the cron expression of an existing job.
+    /// Throws if the job is not found or the new expression is invalid.
+    /// </summary>
+    /// <exception cref="KeyNotFoundException">Job not found.</exception>
+    /// <exception cref="InvalidOperationException">No future occurrence.</exception>
+    void Reschedule(string name, string newCronExpression);
 
-    /// <summary>Pause a running job (timer stops but registration remains).</summary>
+    /// <summary>Pause a running job. Returns false if not found or already paused.</summary>
     bool Pause(string name);
 
-    /// <summary>Resume a previously paused job.</summary>
+    /// <summary>Resume a paused job. Returns false if not found or not paused.</summary>
     bool Resume(string name);
 
     /// <summary>
