@@ -114,7 +114,12 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     messages.Add([new Image(image)]);
                 }
                 StringBuilder sb = new();
-                sb.AppendLine(ProcessDescription(videoInfo.Description));
+                string desc = ProcessDescription(videoInfo.Description);
+                if (!string.IsNullOrEmpty(desc))
+                {
+                    sb.AppendLine(desc);
+                    sb.AppendLine();
+                }
                 sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
                 messages.Add([new Text(sb.ToString().Trim())]);
                 Config.LastPubTimes[userId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -294,7 +299,12 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             message.Add([new Image(image)]);
         }
         StringBuilder sb = new();
-        sb.AppendLine(ProcessDescription(videoInfo.Description));
+        string desc = ProcessDescription(videoInfo.Description);
+        if (!string.IsNullOrEmpty(desc))
+        {
+            sb.AppendLine(desc);
+            sb.AppendLine();
+        }
         if (isLightApp)
         {
             sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
