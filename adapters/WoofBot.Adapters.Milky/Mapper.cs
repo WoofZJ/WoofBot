@@ -55,47 +55,37 @@ public static class MilkyMapper
                         JsonNode node = JsonSerializer.Deserialize<JsonNode>(
                             lightAppSegment.Data.JsonPayload
                         )!;
-                        if (
-                            node.AsObject().TryGetPropertyValue("meta", out var meta)
-                            && meta is not null
-                        )
+                        string? appId = null,
+                            title = null,
+                            desc = null,
+                            url = null;
+                        if (node["meta"]?["news"] is not null)
                         {
-                            JsonNode? appId,
-                                title,
-                                desc,
-                                url;
-                            if (
-                                meta.AsObject().TryGetPropertyValue("news", out var news)
-                                && news is not null
-                            )
-                            {
-                                news.AsObject().TryGetPropertyValue("desc", out appId);
-                                news.AsObject().TryGetPropertyValue("tag", out title);
-                                news.AsObject().TryGetPropertyValue("title", out desc);
-                                news.AsObject().TryGetPropertyValue("jumpUrl", out url);
-                            }
-                            else if (
-                                node.AsObject().TryGetPropertyValue("detail_1", out var detail1)
-                                && detail1 is not null
-                            )
-                            {
-                                detail1.AsObject().TryGetPropertyValue("appid", out appId);
-                                detail1.AsObject().TryGetPropertyValue("title", out title);
-                                detail1.AsObject().TryGetPropertyValue("desc", out desc);
-                                detail1.AsObject().TryGetPropertyValue("qqdocurl", out url);
-                            }
-                            else
-                            {
-                                break;
-                            }
-                            messages.Add(
-                                new WoofModels.LightApp(
-                                    appId?.GetValue<string>() ?? "",
-                                    title?.GetValue<string>() ?? "",
-                                    desc?.GetValue<string>() ?? "",
-                                    url?.GetValue<string>() ?? ""
-                                )
+                            JsonNode news = node["meta"]!["news"]!;
+                            appId = news["desc"]?.GetValue<string>();
+                            title = news["tag"]?.GetValue<string>();
+                            desc = news["title"]?.GetValue<string>();
+                            url = news["jumpUrl"]?.GetValue<string>();
+                        }
+                        else if (node["meta"]?["detail_1"] is not null)
+                        {
+                            JsonNode detail = node["meta"]!["detail_1"]!;
+                            appId = detail["appid"]?.GetValue<string>();
+                            title = detail["title"]?.GetValue<string>();
+                            desc = detail["desc"]?.GetValue<string>();
+                            url = detail["qqdocurl"]?.GetValue<string>();
+                        }
+                        if (appId is null || title is null || desc is null || url is null)
+                        {
+                            Console.WriteLine(
+                                "Unsupported LightApp message segment with payload: "
+                                    + lightAppSegment.Data.JsonPayload
                             );
+                            messages.Add(new WoofModels.UnSupportedSegment());
+                        }
+                        else
+                        {
+                            messages.Add(new WoofModels.LightApp(appId, title, desc, url));
                         }
                         break;
                     default:
