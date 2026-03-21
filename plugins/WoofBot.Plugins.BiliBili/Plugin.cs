@@ -81,9 +81,11 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         return result;
     }
 
-    async Task<Dictionary<long, List<Messages>>> UpdateSubscribe(HashSet<long> userIds)
+    async Task<Dictionary<long, (string bvid, List<Messages> messages)>> UpdateSubscribe(
+        HashSet<long> userIds
+    )
     {
-        Dictionary<long, List<Messages>> result = [];
+        Dictionary<long, (string bvid, List<Messages> messages)> result = [];
         Console.WriteLine(
             $"[{DateTimeOffset.Now:T}] Checking updates for user IDs: {string.Join(", ", userIds)}"
         );
@@ -101,11 +103,23 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 Console.WriteLine(
                     $"User {userId} has a new video published at {DateTimeOffset.FromUnixTimeSeconds(videoInfo.PublishTime)} (last checked at {DateTimeOffset.FromUnixTimeSeconds(lastPubTime)})"
                 );
-                messages.Add([
-                    new Text(
-                        $"「{videoInfo.AuthorName}」于{TimeSpanToString(DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(videoInfo.PublishTime))}前更新了！"
-                    ),
-                ]);
+                StringBuilder sb = new();
+                string AuthorName =
+                    videoInfo.Staffs.FirstOrDefault(s => s.Mid == userId)?.Name
+                    ?? videoInfo.AuthorName;
+                sb.Append(
+                    $"「{AuthorName}」于{TimeSpanToString(DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(videoInfo.PublishTime))}前更新了！"
+                );
+                if (videoInfo.Staffs.Length > 0)
+                {
+                    sb.Append("是与");
+                    sb.AppendJoin(
+                        "、",
+                        videoInfo.Staffs.Where(s => s.Mid != userId).Select(s => $"「{s.Name}」")
+                    );
+                    sb.Append("的联合投稿！");
+                }
+                messages.Add([new Text(sb.ToString().Trim())]);
                 string? image = await GetImageAsync(
                     "/video/info/image?bvid=" + Uri.EscapeDataString(videoInfo.Bvid)
                 );
@@ -113,7 +127,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 {
                     messages.Add([new Image(image)]);
                 }
-                StringBuilder sb = new();
+                sb.Clear();
                 string desc = ProcessDescription(videoInfo.Description);
                 if (!string.IsNullOrEmpty(desc))
                 {
@@ -125,7 +139,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 Config.LastPubTimes[userId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 UpdateConfig();
             }
-            result[userId] = messages;
+            result[userId] = (videoInfo?.Bvid ?? string.Empty, messages);
         }
         return result;
     }
@@ -147,18 +161,23 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         {
             if (!groups.Contains(entry.GroupId))
                 continue;
+            HashSet<string> bvids = [];
             foreach (var userId in entry.UserIds)
             {
                 if (updates.ContainsKey(userId))
                 {
-                    List<Messages> messages = updates[userId];
-                    foreach (var msg in messages)
+                    var (bvid, messages) = updates[userId];
+                    if (!string.IsNullOrEmpty(bvid) && !bvids.Contains(bvid))
                     {
-                        await adapter.SendMessageAsync(
-                            new Target(TargetType.Group, entry.GroupId),
-                            msg
-                        );
-                        await Task.Delay(1000);
+                        bvids.Add(bvid);
+                        foreach (var msg in messages)
+                        {
+                            await adapter.SendMessageAsync(
+                                new Target(TargetType.Group, entry.GroupId),
+                                msg
+                            );
+                            await Task.Delay(1000);
+                        }
                     }
                 }
             }
@@ -230,17 +249,9 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
 
     private static string ProcessDescription(string description)
     {
-        if (!string.IsNullOrWhiteSpace(description))
+        if (!string.IsNullOrWhiteSpace(description) && description.Trim().Length < 120)
         {
-            description = description.Trim();
-            if (description.Length >= 200)
-            {
-                return description[..150] + $"...\n（已省略{description.Length - 150}字符）";
-            }
-            else
-            {
-                return description;
-            }
+            return description.Trim();
         }
         return string.Empty;
     }
