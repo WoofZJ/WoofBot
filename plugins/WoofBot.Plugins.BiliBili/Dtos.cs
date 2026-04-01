@@ -25,4 +25,31 @@ public record VideoInfo(
     Staff[] Staffs
 );
 
+public record DouyinVideoInfo(
+    string AwemeId,
+    string Title,
+    string Desc,
+    long CreateTime,
+    int Duration,
+    int AwemeType,
+    string Cover,
+    string AuthorUid,
+    string AuthorSecUid,
+    string AuthorNickname,
+    string AuthorAvatar,
+    int Width,
+    int Height,
+    int DiggCount,
+    int DanmakuCount,
+    int CommentCount,
+    int CollectCount,
+    int ShareCount,
+    int RecommendCount,
+    string MusicTitle,
+    string MusicAuthor,
+    int IsTop,
+    long VideoSize,
+    string VideoUrl
+);
+
 public record UserIdInfo(long UserId, string Username, long Fans);

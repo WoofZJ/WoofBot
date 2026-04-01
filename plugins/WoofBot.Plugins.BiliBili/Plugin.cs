@@ -44,7 +44,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
     async Task<VideoInfo?> GetVideoInfoAsync(long userId)
     {
         var response = await _httpClient.GetAsync(
-            Config.RequestUrl.TrimEnd('/') + $"/video/latest?user_id={userId}"
+            Config.RequestUrl.TrimEnd('/') + $"/bilibili/video/latest?user_id={userId}"
         );
         if (!response.IsSuccessStatusCode)
             return null;
@@ -69,7 +69,8 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
     async Task<UserIdInfo?> GetUserIdByName(string username)
     {
         var response = await _httpClient.GetAsync(
-            Config.RequestUrl.TrimEnd('/') + $"/user/id?username={Uri.EscapeDataString(username)}"
+            Config.RequestUrl.TrimEnd('/')
+                + $"/bilibili/user/id?username={Uri.EscapeDataString(username)}"
         );
         if (!response.IsSuccessStatusCode)
             return null;
@@ -121,7 +122,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 }
                 messages.Add([new Text(sb.ToString().Trim())]);
                 string? image = await GetImageAsync(
-                    "/video/info/image?bvid=" + Uri.EscapeDataString(videoInfo.Bvid)
+                    "/bilibili/video/info/image?bvid=" + Uri.EscapeDataString(videoInfo.Bvid)
                 );
                 if (image is not null)
                 {
@@ -264,7 +265,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         {
             var response = await _httpClient.GetAsync(
                 Config.RequestUrl.TrimEnd('/')
-                    + $"/video/info/short_url?short_url={Uri.EscapeDataString(url)}"
+                    + $"/bilibili/video/info/short_url?short_url={Uri.EscapeDataString(url)}"
             );
             if (!response.IsSuccessStatusCode)
                 return
@@ -282,7 +283,8 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     [new Text("链接解析失败 ;-;")],
                 ];
             json = await _httpClient.GetStringAsync(
-                Config.RequestUrl.TrimEnd('/') + $"/video/info?bvid={Uri.EscapeDataString(bvid)}"
+                Config.RequestUrl.TrimEnd('/')
+                    + $"/bilibili/video/info?bvid={Uri.EscapeDataString(bvid)}"
             );
         }
         var videoInfo = JsonSerializer.Deserialize<VideoInfo>(
@@ -296,14 +298,14 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             ];
         List<Messages> message = [];
         string? image = await GetImageAsync(
-            $"/video/info/image?bvid={Uri.EscapeDataString(videoInfo.Bvid)}"
+            $"/bilibili/video/info/image?bvid={Uri.EscapeDataString(videoInfo.Bvid)}"
         );
         if (image is not null)
         {
             message.Add([new Image(image)]);
         }
         image = await GetImageAsync(
-            $"/video/comments/image?bvid={Uri.EscapeDataString(videoInfo.Bvid)}"
+            $"/bilibili/video/comments/image?bvid={Uri.EscapeDataString(videoInfo.Bvid)}"
         );
         if (image is not null)
         {
@@ -324,6 +326,49 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         {
             message.Add([new Text(sb.ToString().Trim())]);
         }
+        return message;
+    }
+
+    private async Task<List<Messages>> ParseDouyinLink(string url)
+    {
+        var response = await _httpClient.GetAsync(
+            Config.RequestUrl.TrimEnd('/') + $"/douyin/work/info?url={Uri.EscapeDataString(url)}"
+        );
+        if (!response.IsSuccessStatusCode)
+            return
+            [
+                [new Text("链接解析失败 ;-;")],
+            ];
+        var json = await response.Content.ReadAsStringAsync();
+        var videoInfo = JsonSerializer.Deserialize<DouyinVideoInfo>(
+            json,
+            new JsonSerializerOptions() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }
+        );
+        if (videoInfo is null)
+            return
+            [
+                [new Text("视频解析失败 ;-;")],
+            ];
+        List<Messages> message = [];
+        string? image = await GetImageAsync(
+            $"/douyin/work/info/image?url={Uri.EscapeDataString(url)}"
+        );
+        if (image is not null)
+        {
+            message.Add([new Image(image)]);
+        }
+        image = await GetImageAsync($"/douyin/work/comments/image?url={Uri.EscapeDataString(url)}");
+        if (image is not null)
+        {
+            message.Add([new Image(image)]);
+        }
+        StringBuilder sb = new();
+        string desc = ProcessDescription(videoInfo.Desc);
+        if (!string.IsNullOrEmpty(desc))
+        {
+            sb.AppendLine(desc);
+        }
+        message.Add([new Text(sb.ToString().Trim())]);
         return message;
     }
 
@@ -359,7 +404,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 var groups = new[] { msgEvt.Target.Id };
                 await DoCheck(groups, adapter);
             }
-            else if (text.Content == "启用b站链接解析")
+            else if (text.Content == "启用抖b链接解析")
             {
                 if (!Config.MonitorGroups.Contains(msgEvt.Target.Id))
                 {
@@ -367,7 +412,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     UpdateConfig();
                     await adapter.SendMessageAsync(
                         new Target(TargetType.Group, msgEvt.Target.Id),
-                        [new Text("已启用b站链接解析~")]
+                        [new Text("已启用链接解析~")]
                     );
                 }
                 else
@@ -378,7 +423,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     );
                 }
             }
-            else if (text.Content == "禁用b站链接解析")
+            else if (text.Content == "禁用抖b链接解析")
             {
                 if (Config.MonitorGroups.Contains(msgEvt.Target.Id))
                 {
@@ -386,7 +431,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     UpdateConfig();
                     await adapter.SendMessageAsync(
                         new Target(TargetType.Group, msgEvt.Target.Id),
-                        [new Text("已禁用b站链接解析~")]
+                        [new Text("已禁用链接解析~")]
                     );
                 }
                 else
@@ -429,21 +474,46 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                             .Value;
                         break;
                     }
+                    if (plainText.Content.Contains("douyin.com"))
+                    {
+                        url = Regex
+                            .Match(
+                                plainText.Content,
+                                @"(https?://)?((v\.)|(www\.))?(douyin\.com/[a-zA-Z0-9!-~]+)"
+                            )
+                            .Value;
+                        break;
+                    }
                 }
             }
             if (url is not null)
             {
-                List<Messages> messages = await ParseBilibiliLink(
-                    url,
-                    msgEvt2.Messages is [LightApp]
-                );
-                foreach (var msgs in messages)
+                if (url.Contains("douyin.com"))
                 {
-                    await adapter.SendMessageAsync(
-                        new Target(TargetType.Group, msgEvt2.Target.Id),
-                        msgs
+                    List<Messages> messages = await ParseDouyinLink(url);
+                    foreach (var msgs in messages)
+                    {
+                        await adapter.SendMessageAsync(
+                            new Target(TargetType.Group, msgEvt2.Target.Id),
+                            msgs
+                        );
+                        await Task.Delay(1000);
+                    }
+                }
+                else
+                {
+                    List<Messages> messages = await ParseBilibiliLink(
+                        url,
+                        msgEvt2.Messages is [LightApp]
                     );
-                    await Task.Delay(1000);
+                    foreach (var msgs in messages)
+                    {
+                        await adapter.SendMessageAsync(
+                            new Target(TargetType.Group, msgEvt2.Target.Id),
+                            msgs
+                        );
+                        await Task.Delay(1000);
+                    }
                 }
             }
         }
