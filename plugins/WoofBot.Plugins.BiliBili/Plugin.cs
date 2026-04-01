@@ -41,11 +41,24 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             return $"{ts.Seconds}秒";
     }
 
-    async Task<VideoInfo?> GetVideoInfoAsync(long userId)
+    async Task<VideoInfo?> GetVideoInfoAsync(long userId, int retryCount = 0)
     {
         var response = await _httpClient.GetAsync(
             Config.RequestUrl.TrimEnd('/') + $"/bilibili/video/latest?user_id={userId}"
         );
+        if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+        {
+            if (retryCount >= 3)
+            {
+                Console.WriteLine(
+                    $"[{DateTimeOffset.Now:T}] 重试3次，放弃获取用户 {userId} 的视频信息"
+                );
+                return null;
+            }
+            var retryAfter = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(5);
+            await Task.Delay(retryAfter);
+            return await GetVideoInfoAsync(userId);
+        }
         if (!response.IsSuccessStatusCode)
             return null;
         var json = await response.Content.ReadAsStringAsync();
@@ -350,6 +363,10 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 [new Text("视频解析失败 ;-;")],
             ];
         List<Messages> message = [];
+        if (videoInfo.VideoSize < 10 * 1024 * 1024) // 10MB
+        {
+            message.Add([new Video(videoInfo.VideoUrl)]);
+        }
         string? image = await GetImageAsync(
             $"/douyin/work/info/image?url={Uri.EscapeDataString(url)}"
         );
@@ -362,13 +379,6 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         {
             message.Add([new Image(image)]);
         }
-        StringBuilder sb = new();
-        string desc = ProcessDescription(videoInfo.Desc);
-        if (!string.IsNullOrEmpty(desc))
-        {
-            sb.AppendLine(desc);
-        }
-        message.Add([new Text(sb.ToString().Trim())]);
         return message;
     }
 
