@@ -382,6 +382,50 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         return message;
     }
 
+    private async Task<List<Messages>> ParseYoutubeLink(string url)
+    {
+        var response = await _httpClient.GetAsync(
+            Config.RequestUrl.TrimEnd('/')
+                + $"/youtube/video/info/url?url={Uri.EscapeDataString(url)}"
+        );
+        if (!response.IsSuccessStatusCode)
+            return
+            [
+                [new Text("链接解析失败 ;-;")],
+            ];
+        var json = await response.Content.ReadAsStringAsync();
+        var videoInfo = JsonSerializer.Deserialize<YoutubeVideoInfo>(
+            json,
+            new JsonSerializerOptions() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }
+        );
+        if (videoInfo is null)
+            return
+            [
+                [new Text("视频解析失败 ;-;")],
+            ];
+        List<Messages> message = [];
+        string? image = await GetImageAsync(
+            $"/youtube/video/info/url/image?url={Uri.EscapeDataString(url)}"
+        );
+        if (image is not null)
+        {
+            message.Add([new Image(image)]);
+        }
+        image = await GetImageAsync(
+            $"/youtube/video/comments/image?video_id={Uri.EscapeDataString(videoInfo.VideoId)}"
+        );
+        if (image is not null)
+        {
+            message.Add([new Image(image)]);
+        }
+        string desc = ProcessDescription(videoInfo.Description);
+        if (!string.IsNullOrEmpty(desc))
+        {
+            message.Add([new Text(desc)]);
+        }
+        return message;
+    }
+
     protected override async Task HandleEventAsync(Event evt, IAdapter adapter)
     {
         if (
@@ -494,6 +538,26 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                             .Value;
                         break;
                     }
+                    if (plainText.Content.Contains("youtu.be/"))
+                    {
+                        url = Regex
+                            .Match(
+                                plainText.Content,
+                                @"(https?://)?(www\.)?(youtu\.be/[a-zA-Z0-9_-]+)"
+                            )
+                            .Value;
+                        break;
+                    }
+                    if (plainText.Content.Contains("youtube.com/"))
+                    {
+                        url = Regex
+                            .Match(
+                                plainText.Content,
+                                @"(https?://)?(www\.)?(youtube\.com/watch\?v=[a-zA-Z0-9_-]+)"
+                            )
+                            .Value;
+                        break;
+                    }
                 }
             }
             if (url is not null)
@@ -510,7 +574,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                         await Task.Delay(1000);
                     }
                 }
-                else
+                else if (url.Contains("b23.tv/") || url.Contains("bilibili.com/video/"))
                 {
                     List<Messages> messages = await ParseBilibiliLink(
                         url,
@@ -523,6 +587,21 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                             msgs
                         );
                         await Task.Delay(1000);
+                    }
+                }
+                else if (url.Contains("youtu.be/") || url.Contains("youtube.com/"))
+                {
+                    if (Config.Admins.Contains(msgEvt2.SenderId))
+                    {
+                        List<Messages> messages = await ParseYoutubeLink(url);
+                        foreach (var msgs in messages)
+                        {
+                            await adapter.SendMessageAsync(
+                                new Target(TargetType.Group, msgEvt2.Target.Id),
+                                msgs
+                            );
+                            await Task.Delay(1000);
+                        }
                     }
                 }
             }

@@ -52,4 +52,25 @@ public record DouyinVideoInfo(
     string VideoUrl
 );
 
+public record YoutubeVideoInfo(
+    string VideoId,
+    string Title,
+    string Description,
+    string ChannelTitle,
+    string ChannelId,
+    string ChannelAvatar,
+    string PublishedAt,
+    string Thumbnail,
+    long Duration,
+    string Dimension,
+    string Definition,
+    bool Caption,
+    int ViewCount,
+    int LikeCount,
+    int CommentCount,
+    int LocalizationCount,
+    string DefaultLanguage,
+    string DefaultAudioLanguage
+);
+
 public record UserIdInfo(long UserId, string Username, long Fans);
