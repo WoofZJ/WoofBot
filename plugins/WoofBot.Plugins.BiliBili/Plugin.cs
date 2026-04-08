@@ -458,7 +458,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 var groups = new[] { msgEvt.Target.Id };
                 await DoCheck(groups, adapter);
             }
-            else if (text.Content == "启用抖b链接解析")
+            else if (text.Content == "启用视频链接解析")
             {
                 if (!Config.MonitorGroups.Contains(msgEvt.Target.Id))
                 {
@@ -477,7 +477,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     );
                 }
             }
-            else if (text.Content == "禁用抖b链接解析")
+            else if (text.Content == "禁用视频链接解析")
             {
                 if (Config.MonitorGroups.Contains(msgEvt.Target.Id))
                 {
