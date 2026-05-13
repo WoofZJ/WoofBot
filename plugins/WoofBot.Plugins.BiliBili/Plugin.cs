@@ -25,6 +25,7 @@ public record BiliBiliPluginConfig
 public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
 {
     private static readonly HttpClient _httpClient = new();
+    private static int _check_idx = 0;
 
     public BiliBiliPlugin()
         : base("BiliBili", "1.0", "A BiliBili plugin") { }
@@ -170,7 +171,17 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 userIds.Add(userId);
             }
         }
-        var updates = await UpdateSubscribe(userIds);
+        if (_check_idx >= userIds.Count)
+        {
+            _check_idx = 0;
+        }
+        if (userIds.Count == 0)
+        {
+            return;
+        }
+        HashSet<long> filteredUserIds = [userIds.ElementAt(_check_idx)];
+        _check_idx += 1;
+        var updates = await UpdateSubscribe(filteredUserIds);
         foreach (var entry in Config.Subscriptions)
         {
             if (!groups.Contains(entry.GroupId))
@@ -613,7 +624,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         base.Subscribe(adapter);
         RegisterSchedule(
             "bilibili-poll",
-            "10,40 * * * *",
+            "* * * * *",
             async (_) =>
             {
                 var groups = Config.Subscriptions.Select(e => e.GroupId).ToArray();
