@@ -1,0 +1,10 @@
+[tools]
+dotnet = "latest"
+
+[tasks.build]
+description = "Build the project"
+run = "pwsh ./scripts/build.ps1"
+
+[tasks.publish]
+description = "Publish the project"
+run = "pwsh ./scripts/publish.ps1"
