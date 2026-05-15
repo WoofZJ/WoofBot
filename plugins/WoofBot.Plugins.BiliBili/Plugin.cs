@@ -281,22 +281,74 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         return string.Empty;
     }
 
+    private async Task<List<Messages>> ParseBilibiliLiveLink(string url, bool isLightApp)
+    {
+        if (!int.TryParse(url.Split('/').Last(), out int liveId))
+        {
+            return
+            [
+                [new Text("链接解析失败 ;-;")],
+            ];
+        }
+        string? liveImage = await GetImageAsync(
+            $"/bilibili/live/room/image?room_id={liveId}"
+        );
+        if (liveImage is null)
+            return
+            [
+                [new Text("链接解析失败 ;-;")],
+            ];
+        List<Messages> messages = [];
+        messages.Add([new Image(liveImage)]);
+        if (isLightApp)
+        {
+            messages.Add(
+                [
+                    new Text($"链接：https://live.bilibili.com/{liveId}"),
+                ]
+            );
+        }
+        return messages;
+    }
+
     private async Task<List<Messages>> ParseBilibiliLink(string url, bool isLightApp)
     {
         url = url.Split('?')[0];
         string json;
         if (url.Contains("b23.tv"))
         {
-            var response = await _httpClient.GetAsync(
+            var resp = await _httpClient.GetAsync(
                 Config.RequestUrl.TrimEnd('/')
-                    + $"/bilibili/video/info/short_url?short_url={Uri.EscapeDataString(url)}"
+                    + $"/bilibili/resolve?short_url={Uri.EscapeDataString(url)}"
             );
-            if (!response.IsSuccessStatusCode)
+            if (!resp.IsSuccessStatusCode)
                 return
                 [
                     [new Text("链接解析失败 ;-;")],
                 ];
-            json = await response.Content.ReadAsStringAsync();
+            string realUrl = await resp.Content.ReadAsStringAsync();
+            realUrl = realUrl.Trim('"').Split('?')[0];
+            if (realUrl.Contains("live.bilibili.com"))
+            {
+                return await ParseBilibiliLiveLink(realUrl, isLightApp);
+            }
+            else
+            {
+                var response = await _httpClient.GetAsync(
+                    Config.RequestUrl.TrimEnd('/')
+                        + $"/bilibili/video/info/short_url?short_url={Uri.EscapeDataString(url)}"
+                );
+                if (!response.IsSuccessStatusCode)
+                    return
+                    [
+                        [new Text("链接解析失败 ;-;")],
+                    ];
+                json = await response.Content.ReadAsStringAsync();
+            }
+        }
+        else if (url.Contains("live.bilibili.com"))
+        {
+            return await ParseBilibiliLiveLink(url, false);
         }
         else
         {
@@ -521,6 +573,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             )
             {
                 url = lightApp.Url;
+                Console.WriteLine($"Detected light app with URL: {url}");
             }
             else
             {
@@ -528,15 +581,17 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 {
                     if (
                         plainText.Content.Contains("b23.tv/")
-                        || plainText.Content.Contains("bilibili.com/video/")
+                        || plainText.Content.Contains("bilibili.com")
+                        || plainText.Content.Contains("live.bilibili.com/")
                     )
                     {
                         url = Regex
                             .Match(
                                 plainText.Content,
-                                @"(https?://)?(www\.)?(b23\.tv/[a-zA-Z0-9]+|bilibili\.com/video/[a-zA-Z0-9]+)"
+                                @"(https?://)?(www\.)?(b23\.tv/[a-zA-Z0-9]+|bilibili\.com/video/[a-zA-Z0-9]+|live\.bilibili\.com/[0-9]+)"
                             )
                             .Value;
+                        Console.WriteLine($"Detected URL in text: {url}");
                         break;
                     }
                     if (plainText.Content.Contains("douyin.com"))
@@ -585,7 +640,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                         await Task.Delay(1000);
                     }
                 }
-                else if (url.Contains("b23.tv/") || url.Contains("bilibili.com/video/"))
+                else if (url.Contains("b23.tv/") || url.Contains("bilibili.com"))
                 {
                     List<Messages> messages = await ParseBilibiliLink(
                         url,
