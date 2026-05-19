@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using HtmlAgilityPack;
 using WoofBot.Sdk.Interfaces;
@@ -18,7 +19,7 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
     public RocomPlugin()
         : base("Rocom", "1.0", "A simple rocom plugin") { }
 
-    private HttpClient _httpClient = new();
+    private readonly HttpClient _httpClient = new();
 
     public override void Initialize(string configDir, ICronScheduler cronScheduler)
     {
@@ -94,68 +95,57 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
                     );
                     return;
                 }
-                string query =
-                    Config.ApiEndpoint.TrimEnd('/')
-                    + $"/egg_group_query.php?action=predict&size={size}&weight={weight}&show_details=false&use_tongcheng=false";
-                _httpClient.DefaultRequestHeaders.Add(
-                    "Referer",
-                    $"{Config.ApiEndpoint.TrimEnd("/")}/egg_group_query.php"
-                );
-                var request = await _httpClient.GetAsync(query);
-                _httpClient.DefaultRequestHeaders.Remove("Referer");
-                if (!request.IsSuccessStatusCode)
-                {
-                    Console.WriteLine($"Failed to query egg: {request.StatusCode}");
-                    await adapter.SendMessageAsync(
-                        msgEvt.Target,
-                        [new Text("查询失败，请稍后再试~")]
-                    );
-                    return;
-                }
-                var json = await request.Content.ReadAsStringAsync();
-                EggQueryResult? result = null;
-                try
-                {
-                    result = JsonSerializer.Deserialize<EggQueryResult>(
-                        json,
-                        new JsonSerializerOptions
-                        {
-                            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-                        }
-                    );
-                }
-                catch { }
-                if (result is null || result.Pokemons.Count == 0 || result.Pokemons[0].Prob < 0.01)
-                {
-                    await adapter.SendMessageAsync(
-                        msgEvt.Target,
-                        [new Text("好像没有合适的精灵呢~")]
-                    );
-                    return;
-                }
-                IEnumerable<Pokemon> pokemons = result
-                    .Pokemons.Where(p => p.Prob >= 0.01)
-                    .OrderByDescending(p => p.Prob);
-                StringBuilder sb = new();
-                sb.AppendLine($"共有 {pokemons.Count()} 个概率大于1%的结果：");
-                foreach (var pokemon in pokemons)
-                {
-                    sb.Append($"- [{pokemon.TId:D3}] ");
-                    sb.Append(pokemon.Name);
-                    sb.Append($" ({pokemon.Prob:P1})");
-                    if (pokemon.IsBig)
-                    {
-                        sb.Append("，会是大块头！");
-                    }
-                    else if (pokemon.IsTiny)
-                    {
-                        sb.Append("，会是小不点！");
-                    }
-                    sb.AppendLine();
-                }
-                await adapter.SendMessageAsync(msgEvt.Target, [new Text(sb.ToString().Trim())]);
+                var msgs = await GetEggQueryResult(size, weight);
+                await adapter.SendMessageAsync(msgEvt.Target, msgs);
             }
         }
+    }
+
+    private async Task<Messages> GetEggQueryResult(float size, float weight)
+    {
+        string query =
+            Config.ApiEndpoint.TrimEnd('/')
+            + $"/egg_group_query.php?action=predict&size={size}&weight={weight}&show_details=false&use_tongcheng=false";
+        _httpClient.DefaultRequestHeaders.Add(
+            "Referer",
+            $"{Config.ApiEndpoint.TrimEnd("/")}/egg_group_query.php"
+        );
+        var request = await _httpClient.GetAsync(query);
+        _httpClient.DefaultRequestHeaders.Remove("Referer");
+        if (!request.IsSuccessStatusCode)
+        {
+            Console.WriteLine($"Failed to query egg: {request.StatusCode}");
+            return [new Text("查询失败 ;-;")];
+        }
+        var json = await request.Content.ReadAsStringAsync();
+        EggQueryResult? result = await request.Content.ReadFromJsonAsync<EggQueryResult>(
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }
+        );
+        if (result is null || result.Pokemons.Count == 0 || result.Pokemons[0].Prob < 0.01)
+        {
+            return [new Text("好像没有合适的精灵呢~")];
+        }
+        IEnumerable<Pokemon> pokemons = result
+            .Pokemons.Where(p => p.Prob >= 0.01)
+            .OrderByDescending(p => p.Prob);
+        StringBuilder sb = new();
+        sb.AppendLine($"共有 {pokemons.Count()} 个概率大于1%的结果：");
+        foreach (var pokemon in pokemons)
+        {
+            sb.Append($"- [{pokemon.TId:D3}] ");
+            sb.Append(pokemon.Name);
+            sb.Append($" ({pokemon.Prob:P1})");
+            if (pokemon.IsBig)
+            {
+                sb.Append("，会是大块头！");
+            }
+            else if (pokemon.IsTiny)
+            {
+                sb.Append("，会是小不点！");
+            }
+            sb.AppendLine();
+        }
+        return [new Text(sb.ToString().Trim())];
     }
 
     private async Task<Messages> GetShopItems()
