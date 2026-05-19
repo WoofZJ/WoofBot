@@ -20,6 +20,16 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
         : base("Rocom", "1.0", "A simple rocom plugin") { }
 
     private readonly HttpClient _httpClient = new();
+    private readonly List<string>[] _shopItems =
+    [
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    ];
+    private DateTime? _shopUpdateTime = null;
 
     public override void Initialize(string configDir, ICronScheduler cronScheduler)
     {
@@ -37,7 +47,7 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
             && msgEvt.Messages is [Text text]
         )
         {
-            if (text.Content == "查询远行商人")
+            if (text.Content == "查询远行商人" && Config.EnabledGroups.Contains(msgEvt.Target.Id))
             {
                 var msgs = await GetShopItems();
                 if (msgs.Count > 0)
@@ -148,13 +158,20 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
         return [new Text(sb.ToString().Trim())];
     }
 
-    private async Task<Messages> GetShopItems()
+    private async Task UpdateShopItems()
     {
+        _shopUpdateTime = DateTime.UtcNow;
+        int periodId = _shopUpdateTime.Value.Hour / 4;
+        if (periodId >= 4)
+        {
+            return;
+        }
         var request = await _httpClient.GetAsync(Config.ApiEndpoint + "/index.php");
         if (!request.IsSuccessStatusCode)
         {
-            Console.WriteLine($"Failed to get shop items: {request.StatusCode}");
-            return [];
+            Console.WriteLine($"Failed to update shop items: {request.StatusCode}");
+            _shopItems[periodId] = [];
+            return;
         }
         var html = await request.Content.ReadAsStringAsync();
         var doc = new HtmlDocument();
@@ -170,8 +187,37 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
                 srcs.Add(src);
             }
         }
+        _shopItems[periodId] = srcs;
+    }
+
+    private async Task<Messages> GetShopItems()
+    {
+        if (_shopUpdateTime is null)
+        {
+            await UpdateShopItems();
+        }
+        int periodId = DateTime.UtcNow.Hour / 4;
+        int lastUpdatePeriodId = _shopUpdateTime!.Value.Hour / 4;
+        if (
+            DateTime.UtcNow - _shopUpdateTime > TimeSpan.FromHours(4)
+            || periodId != lastUpdatePeriodId
+        )
+        {
+            await UpdateShopItems();
+        }
+        int timeId = (periodId + 2) % 6;
+        List<string> srcs = _shopItems[periodId];
+        if (srcs.Count == 0)
+        {
+            return
+            [
+                new Text($"现在是{timeId * 4}:00~{timeId * 4 + 4}:00时间段，远行商人已经休息啦~"),
+            ];
+        }
         Messages messages = [];
-        messages.Add(new Text("当前远行商人售卖商品："));
+        messages.Add(
+            new Text($"现在是{timeId * 4}:00~{timeId * 4 + 4}:00时间段，远行商人售卖商品有：")
+        );
         foreach (var src in srcs)
         {
             messages.Add(new Image($"{Config.ApiEndpoint.TrimEnd('/')}/{src}"));
