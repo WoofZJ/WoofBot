@@ -1,4 +1,6 @@
-﻿using HtmlAgilityPack;
+﻿using System.Text;
+using System.Text.Json;
+using HtmlAgilityPack;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Models;
 
@@ -74,12 +76,91 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
                     );
                 }
             }
+            else if (
+                text.Content.StartsWith("查询孵蛋")
+                && Config.EnabledGroups.Contains(msgEvt.Target.Id)
+            )
+            {
+                var slices = text.Content.Split(' ');
+                if (
+                    slices.Length != 3
+                    || !float.TryParse(slices[1], out var size)
+                    || !float.TryParse(slices[2], out var weight)
+                )
+                {
+                    await adapter.SendMessageAsync(
+                        msgEvt.Target,
+                        [new Text("指令格式错误，请使用：\n查询孵蛋 [尺寸] [重量]")]
+                    );
+                    return;
+                }
+                string query =
+                    Config.ApiEndpoint.TrimEnd('/')
+                    + $"/egg_group_query.php?action=predict&size={size}&weight={weight}&show_details=false&use_tongcheng=false";
+                _httpClient.DefaultRequestHeaders.Add(
+                    "Referer",
+                    $"{Config.ApiEndpoint.TrimEnd("/")}/egg_group_query.php"
+                );
+                var request = await _httpClient.GetAsync(query);
+                _httpClient.DefaultRequestHeaders.Remove("Referer");
+                if (!request.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"Failed to query egg: {request.StatusCode}");
+                    await adapter.SendMessageAsync(
+                        msgEvt.Target,
+                        [new Text("查询失败，请稍后再试~")]
+                    );
+                    return;
+                }
+                var json = await request.Content.ReadAsStringAsync();
+                EggQueryResult? result = null;
+                try
+                {
+                    result = JsonSerializer.Deserialize<EggQueryResult>(
+                        json,
+                        new JsonSerializerOptions
+                        {
+                            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+                        }
+                    );
+                }
+                catch { }
+                if (result is null || result.Pokemons.Count == 0 || result.Pokemons[0].Prob < 0.01)
+                {
+                    await adapter.SendMessageAsync(
+                        msgEvt.Target,
+                        [new Text("好像没有合适的精灵呢~")]
+                    );
+                    return;
+                }
+                IEnumerable<Pokemon> pokemons = result
+                    .Pokemons.Where(p => p.Prob >= 0.01)
+                    .OrderByDescending(p => p.Prob);
+                StringBuilder sb = new();
+                sb.AppendLine($"共有 {pokemons.Count()} 个概率大于1%的结果：");
+                foreach (var pokemon in pokemons)
+                {
+                    sb.Append($"- [{pokemon.TId:D3}] ");
+                    sb.Append(pokemon.Name);
+                    sb.Append($" ({pokemon.Prob:P1})");
+                    if (pokemon.IsBig)
+                    {
+                        sb.Append("，会是大块头！");
+                    }
+                    else if (pokemon.IsTiny)
+                    {
+                        sb.Append("，会是小不点！");
+                    }
+                    sb.AppendLine();
+                }
+                await adapter.SendMessageAsync(msgEvt.Target, [new Text(sb.ToString().Trim())]);
+            }
         }
     }
 
     private async Task<Messages> GetShopItems()
     {
-        var request = await _httpClient.GetAsync(Config.ApiEndpoint+"/index.php");
+        var request = await _httpClient.GetAsync(Config.ApiEndpoint + "/index.php");
         if (!request.IsSuccessStatusCode)
         {
             Console.WriteLine($"Failed to get shop items: {request.StatusCode}");
