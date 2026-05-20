@@ -29,6 +29,7 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
         [],
         [],
     ];
+    private bool _updateError = false;
     private DateTime? _shopUpdateTime = null;
 
     public override void Initialize(string configDir, ICronScheduler cronScheduler)
@@ -166,6 +167,7 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
         {
             return;
         }
+        _updateError = true;
         var request = await _httpClient.GetAsync(Config.ApiEndpoint + "/index.php");
         if (!request.IsSuccessStatusCode)
         {
@@ -188,22 +190,30 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
             }
         }
         _shopItems[periodId] = srcs;
+        _updateError = false;
     }
 
     private async Task<Messages> GetShopItems()
     {
-        if (_shopUpdateTime is null)
+        int periodId = DateTime.UtcNow.Hour / 4;
+        if (_shopUpdateTime is null || _updateError)
         {
             await UpdateShopItems();
         }
-        int periodId = DateTime.UtcNow.Hour / 4;
-        int lastUpdatePeriodId = _shopUpdateTime!.Value.Hour / 4;
-        if (
-            DateTime.UtcNow - _shopUpdateTime > TimeSpan.FromHours(4)
-            || periodId != lastUpdatePeriodId
-        )
+        else
         {
-            await UpdateShopItems();
+            int lastUpdatePeriodId = _shopUpdateTime!.Value.Hour / 4;
+            if (
+                DateTime.UtcNow - _shopUpdateTime > TimeSpan.FromHours(4)
+                || periodId != lastUpdatePeriodId
+            )
+            {
+                await UpdateShopItems();
+            }
+        }
+        if (_updateError)
+        {
+            return [new Text("获取远行商人商品失败 ;-;")];
         }
         int timeId = (periodId + 2) % 6;
         List<string> srcs = _shopItems[periodId];
