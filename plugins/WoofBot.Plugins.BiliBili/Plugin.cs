@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Models;
 
@@ -51,8 +52,9 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         {
             if (retryCount >= 3)
             {
-                Console.WriteLine(
-                    $"[{DateTimeOffset.Now:T}] 重试3次，放弃获取用户 {userId} 的视频信息"
+                Logger.LogWarning(
+                    "Retried 3 times, giving up getting video information for user {UserId}.",
+                    userId
                 );
                 return null;
             }
@@ -101,8 +103,9 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
     )
     {
         Dictionary<long, (string bvid, List<Messages> messages)> result = [];
-        Console.WriteLine(
-            $"[{DateTimeOffset.Now:T}] Checking updates for user IDs: {string.Join(", ", userIds)}"
+        Logger.LogInformation(
+            "Checking updates for user IDs: {UserIds}",
+            string.Join(", ", userIds)
         );
         foreach (var userId in userIds)
         {
@@ -115,8 +118,11 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             var videoInfo = await GetVideoInfoAsync(userId);
             if (videoInfo is not null && videoInfo.PublishTime > lastPubTime)
             {
-                Console.WriteLine(
-                    $"User {userId} has a new video published at {DateTimeOffset.FromUnixTimeSeconds(videoInfo.PublishTime)} (last checked at {DateTimeOffset.FromUnixTimeSeconds(lastPubTime)})"
+                Logger.LogInformation(
+                    "User {UserId} has a new video published at {PublishTime} (last checked at {LastPubTime}).",
+                    userId,
+                    DateTimeOffset.FromUnixTimeSeconds(videoInfo.PublishTime),
+                    DateTimeOffset.FromUnixTimeSeconds(lastPubTime)
                 );
                 StringBuilder sb = new();
                 string AuthorName =
@@ -573,7 +579,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             )
             {
                 url = lightApp.Url;
-                Console.WriteLine($"Detected light app with URL: {url}");
+                Logger.LogDebug("Detected light app with URL: {Url}", url);
             }
             else
             {
@@ -591,7 +597,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                                 @"(https?://)?(www\.)?(b23\.tv/[a-zA-Z0-9]+|bilibili\.com/video/[a-zA-Z0-9]+|live\.bilibili\.com/[0-9]+)"
                             )
                             .Value;
-                        Console.WriteLine($"Detected URL in text: {url}");
+                        Logger.LogDebug("Detected URL in text: {Url}", url);
                         break;
                     }
                     if (plainText.Content.Contains("douyin.com"))

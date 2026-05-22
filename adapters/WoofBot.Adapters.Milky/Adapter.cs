@@ -1,6 +1,8 @@
 using Milky.Net.Client;
 using Milky.Net.Model;
+using Microsoft.Extensions.Logging;
 using WoofBot.Sdk.Interfaces;
+using WoofBot.Sdk.Logging;
 using WoofBot.Sdk.Models;
 using Event = WoofBot.Sdk.Models.Event;
 
@@ -11,9 +13,10 @@ public record MilkyConfig
     public string Host { get; set; } = "";
     public int Port { get; set; }
     public string Token { get; set; } = "";
+    public LoggingConfig Logging { get; set; } = new();
 }
 
-public class MilkyAdapter(MilkyConfig config) : IAdapter
+public class MilkyAdapter(MilkyConfig config, ILogger<MilkyAdapter>? logger = null) : IAdapter
 {
     public string Name => "Milky";
     public string SelfId { get; set; } = string.Empty;
@@ -22,6 +25,7 @@ public class MilkyAdapter(MilkyConfig config) : IAdapter
     public event Func<Event, IAdapter, Task>? OnEventReceived;
 
     private readonly MilkyConfig _config = config;
+    private readonly ILogger<MilkyAdapter> _logger = logger ?? BotLog.CreateLogger<MilkyAdapter>();
     private MilkyClient? _client;
     private readonly CancellationTokenSource _cts = new();
 
@@ -29,6 +33,7 @@ public class MilkyAdapter(MilkyConfig config) : IAdapter
     {
         if (_client is not null)
             throw new InvalidOperationException("Adapter is already started.");
+        _logger.LogInformation("Starting Milky adapter for {Host}:{Port}.", _config.Host, _config.Port);
         HttpClient httpClient = new()
         {
             BaseAddress = new Uri($"ws://{_config.Host}:{_config.Port}"),
@@ -38,6 +43,7 @@ public class MilkyAdapter(MilkyConfig config) : IAdapter
         var response = await _client.System.GetLoginInfoAsync();
         SelfId = response.Uin.ToString();
         Nickname = response.Nickname;
+        _logger.LogInformation("Milky adapter logged in as {Nickname} ({SelfId}).", Nickname, SelfId);
         _client.Events.MessageReceive += async (milky, evt) =>
         {
             Event? woofEvent = evt.ToWoofBotEvent();
@@ -55,6 +61,7 @@ public class MilkyAdapter(MilkyConfig config) : IAdapter
         {
             _cts.Cancel();
             _client = null;
+            _logger.LogInformation("Milky adapter stopped.");
         }
     }
 

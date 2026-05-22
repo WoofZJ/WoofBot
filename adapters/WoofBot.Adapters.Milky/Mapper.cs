@@ -1,12 +1,18 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Milky.Net.Model;
+using Microsoft.Extensions.Logging;
+using WoofBot.Sdk.Logging;
 using WoofModels = WoofBot.Sdk.Models;
 
 namespace WoofBot.Adapters.Milky;
 
 public static class MilkyMapper
 {
+    private static readonly ILogger s_logger = BotLog.CreateLogger(
+        typeof(MilkyMapper).FullName ?? nameof(MilkyMapper)
+    );
+
     extension(IncomingSegment[] segments)
     {
         public WoofModels.Messages ToWoofBotMessages()
@@ -77,9 +83,9 @@ public static class MilkyMapper
                         }
                         if (appId is null || title is null || desc is null || url is null)
                         {
-                            Console.WriteLine(
-                                "Unsupported LightApp message segment with payload: "
-                                    + lightAppSegment.Data.JsonPayload
+                            s_logger.LogWarning(
+                                "Unsupported LightApp message segment with payload: {Payload}",
+                                lightAppSegment.Data.JsonPayload
                             );
                             messages.Add(new WoofModels.UnSupportedSegment());
                         }
@@ -177,15 +183,18 @@ public static class MilkyMapper
                                 Messages = tempMsg.Segments.ToWoofBotMessages(),
                             };
                         default:
-                            Console.WriteLine(
-                                "Unsupported converting message type: "
-                                    + incomingMessageEvent.Data.GetType().Name
+                            s_logger.LogWarning(
+                                "Unsupported converting message type: {MessageType}",
+                                incomingMessageEvent.Data.GetType().Name
                             );
                             break;
                     }
                     break;
                 default:
-                    Console.WriteLine("Unsupported converting event type: " + evt.GetType().Name);
+                    s_logger.LogWarning(
+                        "Unsupported converting event type: {EventType}",
+                        evt.GetType().Name
+                    );
                     break;
             }
             return null;

@@ -2,6 +2,7 @@
 using System.Text;
 using System.Text.Json;
 using HtmlAgilityPack;
+using Microsoft.Extensions.Logging;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Models;
 
@@ -125,7 +126,7 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
         _httpClient.DefaultRequestHeaders.Remove("Referer");
         if (!request.IsSuccessStatusCode)
         {
-            Console.WriteLine($"Failed to query egg: {request.StatusCode}");
+            Logger.LogWarning("Failed to query egg: {StatusCode}", request.StatusCode);
             return [new Text("查询失败 ;-;")];
         }
         var json = await request.Content.ReadAsStringAsync();
@@ -171,7 +172,7 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
         var request = await _httpClient.GetAsync(Config.ApiEndpoint + "/index.php");
         if (!request.IsSuccessStatusCode)
         {
-            Console.WriteLine($"Failed to update shop items: {request.StatusCode}");
+            Logger.LogWarning("Failed to update shop items: {StatusCode}", request.StatusCode);
             _shopItems[periodId] = [];
             return;
         }

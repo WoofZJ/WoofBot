@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Logging;
 using WoofBot.Sdk.Interfaces;
+using WoofBot.Sdk.Logging;
 using WoofBot.Sdk.Serialization;
 
 namespace WoofBot.Sdk.Models;
@@ -13,14 +15,16 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
     protected List<IAdapter> Adapters { get; private set; } = [];
     protected bool IsEnabled { get; private set; } = false;
     protected TConfig Config { get; private set; } = new();
+    protected ILogger Logger { get; private set; } = BotLog.CreatePluginLogger(Name);
     protected string _configPath = "";
     protected ICronScheduler CronScheduler { get; private set; } = default!;
 
     public virtual void Initialize(string configDir, ICronScheduler cronScheduler)
     {
+        Logger = BotLog.CreatePluginLogger(Name);
         CronScheduler = cronScheduler;
         _configPath = Path.Combine(configDir, $"{Name.ToLower()}.json");
-        Config = ConfigSerializer.LoadConfig<TConfig>(_configPath);
+        Config = ConfigSerializer.LoadConfig<TConfig>(_configPath, Logger);
     }
 
     public virtual void UpdateConfig()
@@ -42,13 +46,15 @@ public abstract class PluginBase<TConfig>(string Name, string Version, string De
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine(
-                        $"[Error] Exception in plugin {Name} handling event: {ex.Message}"
-                    );
+                    Logger.LogError(ex, "Exception in plugin {PluginName} handling event.", Name);
                 }
             };
             Adapters.Add(adapter);
-            Console.WriteLine($"[System] Plugin {Name} subscribed to adapter {adapter.Name}");
+            Logger.LogInformation(
+                "Plugin {PluginName} subscribed to adapter {AdapterName}.",
+                Name,
+                adapter.Name
+            );
         }
     }
 

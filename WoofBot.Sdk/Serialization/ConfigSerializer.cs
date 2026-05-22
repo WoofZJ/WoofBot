@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using WoofBot.Sdk.Logging;
 
 namespace WoofBot.Sdk.Serialization;
 
@@ -14,12 +16,14 @@ public static class ConfigSerializer
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
 
-    public static T LoadConfig<T>(string path)
+    public static T LoadConfig<T>(string path, ILogger? logger = null)
     {
+        logger ??= BotLog.CreateLogger(typeof(ConfigSerializer).FullName ?? nameof(ConfigSerializer));
+
         if (!File.Exists(path))
         {
-            Console.WriteLine($"[Warning] Config file not found: {path}");
-            Console.WriteLine("[Info] Creating default config...");
+            logger.LogWarning("Config file not found: {Path}", path);
+            logger.LogInformation("Creating default config at {Path}", path);
             string dir = Path.GetDirectoryName(path) ?? "";
             if (!Directory.Exists(dir))
             {

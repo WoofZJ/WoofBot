@@ -1,5 +1,7 @@
 using Cronos;
+using Microsoft.Extensions.Logging;
 using WoofBot.Sdk.Interfaces;
+using WoofBot.Sdk.Logging;
 
 namespace WoofBot.Core;
 
@@ -26,10 +28,12 @@ public sealed class CronScheduler : ICronScheduler, IDisposable
     private readonly PriorityQueue<string, DateTimeOffset> _queue = new();
     private readonly Timer _timer;
     private readonly Lock _lock = new();
+    private readonly ILogger<CronScheduler> _logger;
     private bool _disposed;
 
-    public CronScheduler()
+    public CronScheduler(ILogger<CronScheduler>? logger = null)
     {
+        _logger = logger ?? BotLog.CreateLogger<CronScheduler>();
         _timer = new Timer(OnTimerFired, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
 
@@ -87,9 +91,12 @@ public sealed class CronScheduler : ICronScheduler, IDisposable
             ArmTimer();
         }
 
-        Console.WriteLine(
-            $"[Scheduler] Registered job '{name}' for plugin '{pluginName}' "
-                + $"with cron '{cronExpression}', next at {next:yyyy-MM-dd HH:mm:ss}"
+        _logger.LogInformation(
+            "Registered job {JobName} for plugin {PluginName} with cron {CronExpression}, next at {NextOccurrence:yyyy-MM-dd HH:mm:ss}.",
+            name,
+            pluginName,
+            cronExpression,
+            next
         );
     }
 
@@ -108,7 +115,7 @@ public sealed class CronScheduler : ICronScheduler, IDisposable
             ArmTimer();
         }
 
-        Console.WriteLine($"[Scheduler] Unregistered job '{name}'");
+        _logger.LogInformation("Unregistered job {JobName}.", name);
         return true;
     }
 
@@ -136,9 +143,11 @@ public sealed class CronScheduler : ICronScheduler, IDisposable
             ArmTimer();
         }
 
-        Console.WriteLine(
-            $"[Scheduler] Rescheduled job '{name}' with cron '{newCronExpression}', "
-                + $"next at {next:yyyy-MM-dd HH:mm:ss}"
+        _logger.LogInformation(
+            "Rescheduled job {JobName} with cron {CronExpression}, next at {NextOccurrence:yyyy-MM-dd HH:mm:ss}.",
+            name,
+            newCronExpression,
+            next
         );
     }
 
@@ -155,7 +164,7 @@ public sealed class CronScheduler : ICronScheduler, IDisposable
             ArmTimer();
         }
 
-        Console.WriteLine($"[Scheduler] Paused job '{name}'");
+        _logger.LogInformation("Paused job {JobName}.", name);
         return true;
     }
 
@@ -177,7 +186,7 @@ public sealed class CronScheduler : ICronScheduler, IDisposable
             ArmTimer();
         }
 
-        Console.WriteLine($"[Scheduler] Resumed job '{name}'");
+        _logger.LogInformation("Resumed job {JobName}.", name);
         return true;
     }
 
@@ -317,7 +326,7 @@ public sealed class CronScheduler : ICronScheduler, IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Scheduler] Error in job '{entry.Name}': {ex.Message}");
+            _logger.LogError(ex, "Error in job {JobName}.", entry.Name);
         }
 
         lock (_lock)
@@ -329,8 +338,10 @@ public sealed class CronScheduler : ICronScheduler, IDisposable
             if (entry.MaxOccurrences > 0 && entry.OccurrenceCount >= entry.MaxOccurrences)
             {
                 _jobs.Remove(entry.Name);
-                Console.WriteLine(
-                    $"[Scheduler] Job '{entry.Name}' reached max occurrences ({entry.MaxOccurrences}), removed."
+                _logger.LogInformation(
+                    "Job {JobName} reached max occurrences ({MaxOccurrences}), removed.",
+                    entry.Name,
+                    entry.MaxOccurrences
                 );
                 return;
             }
@@ -339,8 +350,9 @@ public sealed class CronScheduler : ICronScheduler, IDisposable
             if (next is null)
             {
                 _jobs.Remove(entry.Name);
-                Console.WriteLine(
-                    $"[Scheduler] No more occurrences for job '{entry.Name}', removed."
+                _logger.LogInformation(
+                    "No more occurrences for job {JobName}, removed.",
+                    entry.Name
                 );
                 return;
             }

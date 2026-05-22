@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using OpenAI;
 using OpenAI.Chat;
 using OpenAI.Responses;
@@ -67,7 +68,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
     private readonly ConcurrentDictionary<string, ConcurrentQueue<ChatMessage>> _pendingMessages =
         new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _groupLocks = new();
-    private Timer _videoQueryTimer;
+    private Timer? _videoQueryTimer;
 
     public override void Initialize(string configDir, ICronScheduler cronScheduler)
     {
@@ -79,7 +80,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
             || string.IsNullOrEmpty(Config.ModelName)
         )
         {
-            Console.WriteLine(
+            Logger.LogWarning(
                 "LLM Plugin is not properly configured. API key, Endpoint, InstructionsFilePath, or ModelName is missing."
             );
             return;
@@ -154,7 +155,10 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                 {
                     _activeSessions.Remove(msgEvt.Target.Id);
                     isActive = false;
-                    Console.WriteLine($"[LLMPlugin] Session expired for group {msgEvt.Target.Id}");
+                    Logger.LogInformation(
+                        "Session expired for group {GroupId}.",
+                        msgEvt.Target.Id
+                    );
                 }
             }
 
@@ -171,8 +175,9 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                 {
                     _activeSessions.Add(msgEvt.Target.Id);
                     isActive = true;
-                    Console.WriteLine(
-                        $"[LLMPlugin] Activated session for group {msgEvt.Target.Id}"
+                    Logger.LogInformation(
+                        "Activated session for group {GroupId}.",
+                        msgEvt.Target.Id
                     );
                 }
             }
@@ -236,8 +241,9 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                 while (queue.TryDequeue(out var msg))
                 {
                     history?.Add(msg);
-                    Console.WriteLine(
-                        $"[Debounce] Flushed message to thread history. Queue count: {queue.Count}"
+                    Logger.LogDebug(
+                        "Flushed message to thread history. Queue count: {QueueCount}",
+                        queue.Count
                     );
                 }
             }
@@ -250,10 +256,10 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
 
             if (isActiveSession)
             {
-                Console.WriteLine($"[Debounce] Invoking Agent for group {target.Id}");
+                Logger.LogDebug("Invoking Agent for group {GroupId}.", target.Id);
                 var response = await _agent!.RunAsync<LLMResponse>(thread);
                 var llmResponse = response.Deserialize<LLMResponse>(JsonSerializerOptions.Web);
-                Console.WriteLine(llmResponse);
+                Logger.LogDebug("LLM response: {@LlmResponse}", llmResponse);
 
                 if (llmResponse.NeedResponse)
                 {
@@ -288,8 +294,9 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                                     statusResponse.EnsureSuccessStatusCode();
                                     var statusJson =
                                         await statusResponse.Content.ReadFromJsonAsync<JsonElement>();
-                                    Console.WriteLine(
-                                        $"[VideoQuery] Video generation status response: {statusJson}"
+                                    Logger.LogDebug(
+                                        "Video generation status response: {StatusJson}",
+                                        statusJson
                                     );
                                     if (
                                         statusJson.TryGetProperty("status", out var statusProp)
@@ -308,8 +315,9 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                                         )
                                         {
                                             var videoUrl = videoUrlProp.GetString();
-                                            Console.WriteLine(
-                                                $"[VideoQuery] Generated video URL: {videoUrl}"
+                                            Logger.LogInformation(
+                                                "Generated video URL: {VideoUrl}",
+                                                videoUrl
                                             );
                                             await adapter.SendMessageAsync(
                                                 target,
@@ -322,8 +330,8 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                                         }
                                         else
                                         {
-                                            Console.WriteLine(
-                                                $"[VideoQuery] Video URL not found in content."
+                                            Logger.LogWarning(
+                                                "Video URL not found in content."
                                             );
                                         }
                                         _videoQueryTimer?.Dispose();
@@ -331,8 +339,9 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine(
-                                        $"[VideoQuery] Error querying video generation status: {ex}"
+                                    Logger.LogError(
+                                        ex,
+                                        "Error querying video generation status."
                                     );
                                 }
                             },
@@ -346,7 +355,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Debounce] Error processing group {target.Id}: {ex}");
+            Logger.LogError(ex, "Error processing group {GroupId}.", target.Id);
         }
         finally
         {
@@ -397,9 +406,9 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
     }
 
     [Description("Get current Utc DateTime.")]
-    private static DateTime GetCurrentDateTime()
+    private DateTime GetCurrentDateTime()
     {
-        Console.WriteLine("GetCurrentDateTime called.");
+        Logger.LogDebug("GetCurrentDateTime called.");
         return DateTime.UtcNow;
     }
 
@@ -413,7 +422,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
     {
         try
         {
-            Console.WriteLine($"Generating image with prompt: {prompt}");
+            Logger.LogDebug("Generating image with prompt: {Prompt}", prompt);
             using var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
@@ -438,14 +447,14 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
             if (jsonResponse.TryGetProperty("data", out var data) && data.GetArrayLength() > 0)
             {
                 var url = data[0].GetProperty("url").GetString();
-                Console.WriteLine($"Generated image URL: {url}");
+                Logger.LogDebug("Generated image URL: {Url}", url);
                 return url ?? "Error: Image URL not found.";
             }
             return "Error: Failed to parse image URL from response.";
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error generating image: {ex.Message}");
+            Logger.LogError(ex, "Error generating image.");
             return $"Error: {ex.Message}";
         }
     }
@@ -458,7 +467,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
     {
         try
         {
-            Console.WriteLine($"Editing image {imageUrl} with prompt: {prompt}");
+            Logger.LogDebug("Editing image {ImageUrl} with prompt: {Prompt}", imageUrl, prompt);
             using var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
@@ -485,7 +494,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
             if (jsonResponse.TryGetProperty("data", out var data) && data.GetArrayLength() > 0)
             {
                 var url = data[0].GetProperty("url").GetString();
-                Console.WriteLine($"Edited image URL: {url}");
+                Logger.LogDebug("Edited image URL: {Url}", url);
                 return url ?? "Error: Image URL not found.";
             }
 
@@ -493,7 +502,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error editing image: {ex.Message}");
+            Logger.LogError(ex, "Error editing image.");
             return $"Error: {ex.Message}";
         }
     }
@@ -511,7 +520,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
     {
         try
         {
-            Console.WriteLine($"Generating video with prompt: {prompt}");
+            Logger.LogDebug("Generating video with prompt: {Prompt}", prompt);
             using var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Config.ImageApiKey);
@@ -530,7 +539,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
             response.EnsureSuccessStatusCode();
 
             var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>();
-            Console.WriteLine($"Video generation response: {jsonResponse}");
+            Logger.LogDebug("Video generation response: {JsonResponse}", jsonResponse);
             if (jsonResponse.TryGetProperty("id", out var idJson))
             {
                 string taskId = idJson.GetString() ?? string.Empty;
@@ -540,7 +549,7 @@ public class LLMPlugin : PluginBase<LLMPluginConfig>
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error editing image: {ex.Message}");
+            Logger.LogError(ex, "Error generating video.");
             return $"Error: {ex.Message}";
         }
     }
