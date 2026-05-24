@@ -43,11 +43,7 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
 
     protected override async Task HandleEventAsync(Event evt, IAdapter adapter)
     {
-        if (
-            evt is MessageEvent msgEvt
-            && Config.Admins.Contains(msgEvt.SenderId)
-            && msgEvt.Messages is [Text text]
-        )
+        if (evt is MessageEvent msgEvt && msgEvt.Messages is [Text text])
         {
             if (text.Content == "查询远行商人" && Config.EnabledGroups.Contains(msgEvt.Target.Id))
             {
