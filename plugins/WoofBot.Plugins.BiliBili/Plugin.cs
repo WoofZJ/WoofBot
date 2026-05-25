@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Net;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
@@ -21,6 +22,7 @@ public record BiliBiliPluginConfig
     public int PollIntervalMinutes { get; init; } = 10;
     public string RequestUrl { get; init; } = "";
     public Dictionary<long, long> LastPubTimes { get; init; } = [];
+    public string ImageFolder { get; init; } = "";
 }
 
 public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
@@ -78,8 +80,9 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         if (!response.IsSuccessStatusCode)
             return null;
         var imageBytes = await response.Content.ReadAsByteArrayAsync();
-        string base64 = Convert.ToBase64String(imageBytes);
-        return $"base64://{base64}";
+        string guid = Guid.NewGuid().ToString();
+        File.WriteAllBytes($"{Config.ImageFolder}/temp/{guid}", imageBytes);
+        return $"file:///app/llbot/data/temp/{guid}";
     }
 
     async Task<UserIdInfo?> GetUserIdByName(string username)
@@ -296,9 +299,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 [new Text("链接解析失败 ;-;")],
             ];
         }
-        string? liveImage = await GetImageAsync(
-            $"/bilibili/live/room/image?room_id={liveId}"
-        );
+        string? liveImage = await GetImageAsync($"/bilibili/live/room/image?room_id={liveId}");
         if (liveImage is null)
             return
             [
@@ -308,11 +309,28 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         messages.Add([new Image(liveImage)]);
         if (isLightApp)
         {
-            messages.Add(
-                [
-                    new Text($"链接：https://live.bilibili.com/{liveId}"),
-                ]
-            );
+            messages.Add([new Text($"链接：https://live.bilibili.com/{liveId}")]);
+        }
+        return messages;
+    }
+
+    private async Task<List<Messages>> ParseXiaoheiheLink(string url, bool isLightApp)
+    {
+        url = WebUtility.UrlEncode(url);
+        var postImage = await GetImageAsync($"/xiaoheihe/post/info/image?share_url={url}");
+        if (postImage is null)
+        {
+            return
+            [
+                [new Text("链接解析失败 ;-;")],
+            ];
+        }
+        var commentImage = await GetImageAsync($"/xiaoheihe/post/comments/image?share_url={url}");
+        List<Messages> messages = [];
+        messages.Add([new Image(postImage)]);
+        if (commentImage is not null)
+        {
+            messages.Add([new Image(commentImage)]);
         }
         return messages;
     }
@@ -575,7 +593,11 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             string? url = null;
             if (
                 msgEvt2.Messages is [LightApp lightApp]
-                && (lightApp.Title == "哔哩哔哩" || lightApp.Title == "哔哩哔哩HD")
+                && (
+                    lightApp.Title == "哔哩哔哩"
+                    || lightApp.Title == "哔哩哔哩HD"
+                    || lightApp.Title == "小黑盒"
+                )
             )
             {
                 url = lightApp.Url;
@@ -674,6 +696,18 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                             );
                             await Task.Delay(1000);
                         }
+                    }
+                }
+                else if (url.Contains("xiaoheihe.cn"))
+                {
+                    var msgs = await ParseXiaoheiheLink(url, msgEvt2.Messages is [LightApp]);
+                    foreach (var msg in msgs)
+                    {
+                        await adapter.SendMessageAsync(
+                            new Target(TargetType.Group, msgEvt2.Target.Id),
+                            msg
+                        );
+                        await Task.Delay(1000);
                     }
                 }
             }
