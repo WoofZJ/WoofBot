@@ -155,7 +155,7 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
             return null;
         }
         var result = await response.Content.ReadFromJsonAsync<MerchantResult>();
-        if (result is not null && result.Items.Count > 0)
+        if (result is not null)
         {
             return result;
         }
@@ -168,6 +168,13 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
         if (result is null)
         {
             return [new Text($"获取远行商人信息失败 ;-;")];
+        }
+        else if (result.Items.Count == 0 || result.Round is null)
+        {
+            return
+            [
+                new Text($"远行商人进货去了~\n下次出现于{result.NextRefreshBeijing:M月d日 HH:mm}"),
+            ];
         }
         StringBuilder sb = new();
         sb.AppendLine($"{result.StartedAtBeijing:MM.dd} 远行商人售卖商品");

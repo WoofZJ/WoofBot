@@ -78,10 +78,10 @@ public record MerchantResult
     public bool Live { get; init; }
 
     [JsonConverter(typeof(CustomDateTimeConverter))]
-    public DateTime StartedAtBeijing { get; init; }
+    public DateTime? StartedAtBeijing { get; init; }
 
     [JsonConverter(typeof(CustomDateTimeConverter))]
     public DateTime NextRefreshBeijing { get; init; }
     public int DurationHours { get; init; }
-    public int Round { get; init; }
+    public int? Round { get; init; }
 }
