@@ -18,8 +18,6 @@ public record RocomPluginConfig
 public class RocomPlugin : PluginBase<RocomPluginConfig>
 {
     private const int LogPreviewLength = 160;
-    private const string MiniProgramUserAgent =
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.49(0x18003131) NetType/WIFI Language/zh_CN miniProgram/wx0000000000000000";
 
     public RocomPlugin()
         : base("Rocom", "1.0", "A simple rocom plugin") { }
@@ -149,123 +147,38 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
         return [new Text(sb.ToString().Trim())];
     }
 
-    private async Task<List<Tuple<string, string>>> GetShopItems()
+    private async Task<MerchantResult?> GetShopItems()
     {
-        using var request = CreateShopItemsRequest();
-        using var response = await _httpClient.SendAsync(request);
-        var html = await response.Content.ReadAsStringAsync();
+        var response = await _httpClient.GetAsync(Config.ApiEndpoint);
         if (!response.IsSuccessStatusCode)
         {
-            Logger.LogWarning(
-                "Failed to update shop items: {StatusCode}. Response: {ResponsePreview}",
-                response.StatusCode,
-                GetLogPreview(html)
-            );
-            return [];
+            return null;
         }
-
-        var doc = new HtmlDocument();
-        doc.LoadHtml(html);
-        var items = doc.DocumentNode.SelectNodes(
-            "//div[contains(concat(' ', normalize-space(@class), ' '), ' merchant-frame-product-item ')]"
-        );
-        if (items is null)
+        var result = await response.Content.ReadFromJsonAsync<MerchantResult>();
+        if (result is not null && result.Items.Count > 0)
         {
-            Logger.LogWarning(
-                "No shop item nodes found in merchant page. Response: {ResponsePreview}",
-                GetLogPreview(html)
-            );
-            return [];
+            return result;
         }
-
-        List<Tuple<string, string>> shopItems = [];
-        foreach (var item in items)
-        {
-            var src = item.SelectSingleNode(".//img")?.GetAttributeValue("src", "")?.Trim() ?? "";
-            if (string.IsNullOrWhiteSpace(src))
-            {
-                continue;
-            }
-
-            var time = NormalizeText(
-                item.SelectSingleNode(
-                    ".//div[contains(concat(' ', normalize-space(@class), ' '), ' merchant-frame-product-time ')]"
-                )?.InnerText
-                    ?? ""
-            );
-            shopItems.Add(new Tuple<string, string>(time, src));
-        }
-        return shopItems;
-    }
-
-    private HttpRequestMessage CreateShopItemsRequest()
-    {
-        var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"{Config.ApiEndpoint.TrimEnd('/')}/index.php"
-        );
-        request.Headers.TryAddWithoutValidation("User-Agent", MiniProgramUserAgent);
-        request.Headers.TryAddWithoutValidation(
-            "Accept",
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-        );
-        request.Headers.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9");
-        request.Headers.Referrer = new Uri("https://servicewechat.com/");
-        request.Headers.TryAddWithoutValidation("X-Requested-With", "com.tencent.mm");
-        request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "cross-site");
-        request.Headers.TryAddWithoutValidation("Sec-Fetch-Mode", "navigate");
-        request.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "document");
-        request.Headers.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
-        return request;
-    }
-
-    private static string NormalizeText(string text)
-    {
-        return string.Join(
-            " ",
-            text.Split([' ', '\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries)
-        );
-    }
-
-    private static string GetLogPreview(string text)
-    {
-        var preview = NormalizeText(text);
-        return preview.Length <= LogPreviewLength ? preview : preview[..LogPreviewLength];
+        return null;
     }
 
     private async Task<Messages> GetShopItemMessages()
     {
-        var shopItems = await GetShopItems();
-        if (shopItems.Count == 0)
+        var result = await GetShopItems();
+        if (result is null)
         {
-            return [new Text($"现在远行商人已经休息啦~")];
+            return [new Text($"获取远行商人信息失败 ;-;")];
         }
-        Messages messages = [];
-        messages.Add(new Text($"今日远行商人售卖商品\n"));
-        shopItems
-            .GroupBy(item => item.Item1)
-            .ToList()
-            .ForEach(group =>
-            {
-                messages.Add(new Text($"{group.Key} 时间段：\n"));
-                group
-                    .ToList()
-                    .ForEach(item =>
-                    {
-                        messages.Add(new Image(GetShopItemImageUrl(item.Item2)));
-                    });
-            });
-        return messages;
-    }
-
-    private string GetShopItemImageUrl(string src)
-    {
-        if (Uri.TryCreate(src, UriKind.Absolute, out var absoluteUri))
+        StringBuilder sb = new();
+        sb.AppendLine($"{result.StartedAtBeijing:MM.dd} 远行商人售卖商品");
+        sb.AppendLine(
+            $"{result.StartedAtBeijing:HH:mm} ~ {result.NextRefreshBeijing:HH:mm} 时间段："
+        );
+        result.Items.ForEach(item =>
         {
-            return absoluteUri.ToString();
-        }
-
-        return $"{Config.ApiEndpoint.TrimEnd('/')}/{src.TrimStart('/')}";
+            sb.AppendLine($"- {item.Name}\n价格：{item.PriceRaw} 洛克贝\n限购：{item.Limit}");
+        });
+        return [new Text(sb.ToString().Trim())];
     }
 
     public override void Subscribe(IAdapter adapter)
@@ -274,7 +187,7 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
         RegisterSchedule(
             "rocom-check",
             "10 8,12,16,20 * * *",
-            async (_) =>
+            async (ct) =>
             {
                 if (Config.EnabledGroups.Count == 0)
                     return;
@@ -284,7 +197,7 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
                     foreach (var groupId in Config.EnabledGroups)
                     {
                         await adapter.SendMessageAsync(new Target(TargetType.Group, groupId), msgs);
-                        await Task.Delay(1000);
+                        await Task.Delay(1000, ct);
                     }
                 }
             }
