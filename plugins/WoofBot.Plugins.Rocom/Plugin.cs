@@ -13,6 +13,7 @@ public record RocomPluginConfig
     public List<string> Admins { get; init; } = [];
     public string ApiEndpoint { get; init; } = string.Empty;
     public List<string> EnabledGroups { get; init; } = [];
+    public string ImageFolder { get; init; } = string.Empty;
 }
 
 public class RocomPlugin : PluginBase<RocomPluginConfig>
@@ -147,45 +148,26 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
         return [new Text(sb.ToString().Trim())];
     }
 
-    private async Task<MerchantResult?> GetShopItems()
+    async Task<string?> GetImageAsync(string route)
     {
-        var response = await _httpClient.GetAsync(Config.ApiEndpoint);
+        var response = await _httpClient.GetAsync(route);
         if (!response.IsSuccessStatusCode)
-        {
             return null;
-        }
-        var result = await response.Content.ReadFromJsonAsync<MerchantResult>();
-        if (result is not null)
-        {
-            return result;
-        }
-        return null;
+        var imageBytes = await response.Content.ReadAsByteArrayAsync();
+        string guid = Guid.NewGuid().ToString();
+        File.WriteAllBytes($"{Config.ImageFolder}/temp/{guid}", imageBytes);
+        return $"file:///app/llbot/data/temp/{guid}";
     }
 
     private async Task<Messages> GetShopItemMessages()
     {
-        var result = await GetShopItems();
-        if (result is null)
+        string route = Config.ApiEndpoint.TrimEnd('/') + "/merchant/info/image";
+        string? image = await GetImageAsync(route);
+        if (image is null)
         {
             return [new Text($"获取远行商人信息失败 ;-;")];
         }
-        else if (result.Items.Count == 0 || result.Round is null)
-        {
-            return
-            [
-                new Text($"远行商人进货去了~\n下次出现于{result.NextRefreshBeijing:M月d日 HH:mm}"),
-            ];
-        }
-        StringBuilder sb = new();
-        sb.AppendLine($"{result.StartedAtBeijing:MM.dd} 远行商人售卖商品");
-        sb.AppendLine(
-            $"{result.StartedAtBeijing:HH:mm} ~ {result.NextRefreshBeijing:HH:mm} 时间段："
-        );
-        result.Items.ForEach(item =>
-        {
-            sb.AppendLine($"- {item.Name}\n价格：{item.PriceRaw} 洛克贝\n限购：{item.Limit}");
-        });
-        return [new Text(sb.ToString().Trim())];
+        return [new Image(image)];
     }
 
     public override void Subscribe(IAdapter adapter)
