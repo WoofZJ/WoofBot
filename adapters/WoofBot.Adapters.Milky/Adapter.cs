@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Logging;
 using Milky.Net.Client;
 using Milky.Net.Model;
-using Microsoft.Extensions.Logging;
 using WoofBot.Sdk.Interfaces;
 using WoofBot.Sdk.Logging;
 using WoofBot.Sdk.Models;
@@ -33,7 +33,11 @@ public class MilkyAdapter(MilkyConfig config, ILogger<MilkyAdapter>? logger = nu
     {
         if (_client is not null)
             throw new InvalidOperationException("Adapter is already started.");
-        _logger.LogInformation("Starting Milky adapter for {Host}:{Port}.", _config.Host, _config.Port);
+        _logger.LogInformation(
+            "Starting Milky adapter for {Host}:{Port}.",
+            _config.Host,
+            _config.Port
+        );
         HttpClient httpClient = new()
         {
             BaseAddress = new Uri($"ws://{_config.Host}:{_config.Port}"),
@@ -43,7 +47,11 @@ public class MilkyAdapter(MilkyConfig config, ILogger<MilkyAdapter>? logger = nu
         var response = await _client.System.GetLoginInfoAsync();
         SelfId = response.Uin.ToString();
         Nickname = response.Nickname;
-        _logger.LogInformation("Milky adapter logged in as {Nickname} ({SelfId}).", Nickname, SelfId);
+        _logger.LogInformation(
+            "Milky adapter logged in as {Nickname} ({SelfId}).",
+            Nickname,
+            SelfId
+        );
         _client.Events.MessageReceive += async (milky, evt) =>
         {
             Event? woofEvent = evt.ToWoofBotEvent();
@@ -69,6 +77,70 @@ public class MilkyAdapter(MilkyConfig config, ILogger<MilkyAdapter>? logger = nu
     {
         if (_client is null)
             throw new InvalidOperationException("Adapter is not started.");
+        if (messages is [UploadFile file])
+        {
+            string folderId = "/";
+            if (file.Folder is not null && file.Folder != "/")
+            {
+                var list = await _client.File.GetGroupFilesAsync(new(long.Parse(target.Id)));
+                if (!list.Folders.Any(folder => folder.FolderName == file.Folder))
+                {
+                    _logger.LogInformation(
+                        "Creating folder {Folder} in group {GroupId}.",
+                        file.Folder,
+                        target.Id
+                    );
+                    var response = await _client.File.CreateGroupFolderAsync(
+                        new(long.Parse(target.Id), file.Folder)
+                    );
+                    folderId = response.FolderId;
+                }
+                else
+                {
+                    folderId = list
+                        .Folders.First(folder => folder.FolderName == file.Folder)
+                        .FolderId;
+                }
+            }
+            var result = await _client.File.GetGroupFilesAsync(
+                new(long.Parse(target.Id), folderId)
+            );
+            if (!result.Files.Any(f => f.FileName == file.Name))
+            {
+                _logger.LogInformation(
+                    "Uploading file {FileName} to group {GroupId} folder {Folder}.",
+                    file.Name,
+                    target.Id,
+                    folderId
+                );
+                var response = await _client.File.UploadGroupFileAsync(
+                    new(long.Parse(target.Id), new(file.Uri), file.Name, folderId)
+                );
+                return 0;
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "File {FileName} already exists in group {GroupId} folder {Folder}.",
+                    file.Name,
+                    target.Id,
+                    folderId
+                );
+                var response = await _client.Message.SendGroupMessageAsync(
+                    new(
+                        long.Parse(target.Id),
+                        [
+                            new OutgoingSegment<TextOutgoingSegmentData>(
+                                new(
+                                    $"文件「{file.Name}」已存在于文件夹「{file.Folder}」中，不再重复上传~"
+                                )
+                            ),
+                        ]
+                    )
+                );
+                return response.MessageSeq;
+            }
+        }
         OutgoingSegment[] segments = messages.ToMilkySegments();
         switch (target.Type)
         {

@@ -34,4 +34,6 @@ public record Sticker(int PackageId, string EmojiId, string Key) : MessageSegmen
 
 public record LightApp(string AppId, string Title, string Description, string Url) : MessageSegment;
 
+public record UploadFile(string Name, string Uri, string Folder) : MessageSegment;
+
 public class Messages : List<MessageSegment> { }

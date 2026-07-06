@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Milky.Net.Model;
 using Microsoft.Extensions.Logging;
+using Milky.Net.Model;
 using WoofBot.Sdk.Logging;
 using WoofModels = WoofBot.Sdk.Models;
 
@@ -110,6 +110,10 @@ public static class MilkyMapper
             List<OutgoingSegment> segments = [];
             foreach (var segment in messages)
             {
+                if (segment is WoofModels.UploadFile uploadFile)
+                {
+                    continue;
+                }
                 segments.Add(
                     segment switch
                     {
