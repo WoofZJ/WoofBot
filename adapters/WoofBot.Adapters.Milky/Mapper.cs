@@ -81,6 +81,14 @@ public static class MilkyMapper
                             desc = detail["desc"]?.GetValue<string>();
                             url = detail["qqdocurl"]?.GetValue<string>();
                         }
+                        else if (node["meta"]?["music"] is not null)
+                        {
+                            JsonNode music = node["meta"]!["music"]!;
+                            appId = music["appid"]?.GetValue<long>().ToString();
+                            title = music["tag"]?.GetValue<string>();
+                            desc = music["title"]?.GetValue<string>();
+                            url = music["jumpUrl"]?.GetValue<string>();
+                        }
                         if (appId is null || title is null || desc is null || url is null)
                         {
                             s_logger.LogWarning(
