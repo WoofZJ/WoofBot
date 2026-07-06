@@ -85,6 +85,25 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         return $"file:///app/llbot/data/temp/{guid}";
     }
 
+    async Task<string?> GetFileAsync(string uri)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync(uri);
+            if (!response.IsSuccessStatusCode)
+                return null;
+            var FileBytes = await response.Content.ReadAsByteArrayAsync();
+            string guid = Guid.NewGuid().ToString();
+            File.WriteAllBytes($"{Config.ImageFolder}/temp/{guid}", FileBytes);
+            return $"file:///app/llbot/data/temp/{guid}";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error while getting file from {Uri}", uri);
+            return null;
+        }
+    }
+
     async Task<UserIdInfo?> GetUserIdByName(string username)
     {
         var response = await _httpClient.GetAsync(
@@ -429,6 +448,68 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         return message;
     }
 
+    private async Task<List<Messages>> ParseNeteaseCloudLink(string url)
+    {
+        var response = await _httpClient.GetAsync(
+            Config.RequestUrl.TrimEnd('/')
+                + $"/neteasecloud/song/info?url={Uri.EscapeDataString(url)}"
+        );
+        if (!response.IsSuccessStatusCode)
+            return
+            [
+                [new Text("链接解析失败 ;-;")],
+            ];
+        var json = await response.Content.ReadAsStringAsync();
+        var songInfo = JsonSerializer.Deserialize<NeteaseCloudSongInfo>(
+            json,
+            new JsonSerializerOptions() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }
+        );
+        if (songInfo is null)
+        {
+            return
+            [
+                [new Text("歌曲解析失败 ;-;")],
+            ];
+        }
+        List<Messages> messages = [];
+        StringBuilder sb = new();
+        sb.AppendLine($"歌曲：{songInfo.Name}");
+        sb.AppendLine($"艺术家：{songInfo.ArtistNames}");
+        sb.AppendLine($"专辑：{songInfo.AlbumName}");
+        sb.AppendLine($"时长：{songInfo.DurationStr}");
+        if (songInfo.Download is not null)
+        {
+            sb.AppendLine(
+                $"品质：{songInfo.Download.QualityName} ({songInfo.Download.Type}, {songInfo.Download.SizeFormatted})"
+            );
+        }
+        // if (songInfo.Lyrics is not null)
+        // {
+        //     messages.Add([new Text($"歌词：\n{songInfo.Lyrics.Lyric}")]);
+        //     if (!string.IsNullOrEmpty(songInfo.Lyrics.TranslatedLyric))
+        //     {
+        //         messages.Add([new Text($"翻译歌词：\n{songInfo.Lyrics.TranslatedLyric}")]);
+        //     }
+        // }
+        messages.Add([new Text(sb.ToString().Trim())]);
+        if (songInfo.Download is not null)
+        {
+            messages.Add([
+                new UploadFile(
+                    $"{songInfo.Name} - {songInfo.ArtistNames}.{songInfo.Download.Type}",
+                    songInfo.Download.Url,
+                    "音乐分享"
+                ),
+            ]);
+        }
+        // if (!string.IsNullOrEmpty(songInfo.Cover))
+        // {
+        //     messages.Add([new Image(songInfo.Cover)]);
+        // }
+
+        return messages;
+    }
+
     private async Task<List<Messages>> ParseDouyinLink(string url)
     {
         var response = await _httpClient.GetAsync(
@@ -597,6 +678,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                     lightApp.Title == "哔哩哔哩"
                     || lightApp.Title == "哔哩哔哩HD"
                     || lightApp.Title == "小黑盒"
+                    || lightApp.Title == "网易云音乐"
                 )
             )
             {
@@ -701,6 +783,18 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 else if (url.Contains("xiaoheihe.cn"))
                 {
                     var msgs = await ParseXiaoheiheLink(url, msgEvt2.Messages is [LightApp]);
+                    foreach (var msg in msgs)
+                    {
+                        await adapter.SendMessageAsync(
+                            new Target(TargetType.Group, msgEvt2.Target.Id),
+                            msg
+                        );
+                        await Task.Delay(1000);
+                    }
+                }
+                else if (url.Contains("music.163.com"))
+                {
+                    var msgs = await ParseNeteaseCloudLink(url);
                     foreach (var msg in msgs)
                     {
                         await adapter.SendMessageAsync(
