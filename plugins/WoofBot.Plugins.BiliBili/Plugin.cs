@@ -494,13 +494,9 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         messages.Add([new Text(sb.ToString().Trim())]);
         if (songInfo.Download is not null)
         {
-            messages.Add([
-                new UploadFile(
-                    $"{songInfo.Name} - {songInfo.ArtistNames}.{songInfo.Download.Type}",
-                    songInfo.Download.Url,
-                    "音乐分享"
-                ),
-            ]);
+            string fileName = $"{songInfo.Name} - {songInfo.ArtistNames}.{songInfo.Download.Type}";
+            fileName = fileName.Replace("/", "_").Replace("\\", "_");
+            messages.Add([new UploadFile(fileName, songInfo.Download.Url, "音乐分享")]);
         }
         // if (!string.IsNullOrEmpty(songInfo.Cover))
         // {
