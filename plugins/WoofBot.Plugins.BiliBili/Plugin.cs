@@ -150,6 +150,12 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 string AuthorName =
                     videoInfo.Staffs.FirstOrDefault(s => s.Mid == userId)?.Name
                     ?? videoInfo.AuthorName;
+                List<string> preview =
+                [
+                    "哔哩哔哩视频",
+                    $"作者：{AuthorName}",
+                    $"更新于：{TimeSpanToString(DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(videoInfo.PublishTime))}前",
+                ];
                 sb.Append(
                     $"「{AuthorName}」于{TimeSpanToString(DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(videoInfo.PublishTime))}前更新了！"
                 );
@@ -175,10 +181,27 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
                 if (!string.IsNullOrEmpty(desc))
                 {
                     sb.AppendLine(desc);
-                    sb.AppendLine();
+                    messages.Add([new Text(sb.ToString().Trim())]);
                 }
-                sb.AppendLine($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}");
-                messages.Add([new Text(sb.ToString().Trim())]);
+                messages.Add([new Text($"链接：https://www.bilibili.com/video/{videoInfo.Bvid}")]);
+                messages =
+                [
+                    [
+                        new GroupedMessage(
+                            videoInfo.Title,
+                            preview.ToArray(),
+                            "Made by WoofZJ",
+                            "[up主视频更新卡片]",
+                            messages
+                                .Select(msg => new GroupedMessagePiece(
+                                    Adapters[0].SelfId,
+                                    Adapters[0].Name,
+                                    msg
+                                ))
+                                .ToList()
+                        ),
+                    ],
+                ];
                 Config.LastPubTimes[userId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 UpdateConfig();
             }
@@ -302,7 +325,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
 
     private static string ProcessDescription(string description)
     {
-        if (!string.IsNullOrWhiteSpace(description) && description.Trim().Length < 120)
+        if (!string.IsNullOrWhiteSpace(description))
         {
             return description.Trim();
         }
