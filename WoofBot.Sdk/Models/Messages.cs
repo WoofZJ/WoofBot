@@ -36,4 +36,14 @@ public record LightApp(string AppId, string Title, string Description, string Ur
 
 public record UploadFile(string Name, string Uri, string Folder) : MessageSegment;
 
+public record GroupedMessagePiece(string UserId, string Name, Messages Messages);
+
+public record GroupedMessage(
+    string? Title,
+    string[]? Preview,
+    string? Summary,
+    string? Prompt,
+    List<GroupedMessagePiece> Pieces
+) : MessageSegment;
+
 public class Messages : List<MessageSegment> { }

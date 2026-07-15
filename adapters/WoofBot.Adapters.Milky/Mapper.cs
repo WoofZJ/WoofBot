@@ -145,6 +145,22 @@ public static class MilkyMapper
                         WoofModels.Face face => new OutgoingSegment<FaceOutgoingSegmentData>(
                             new(face.Id.ToString())
                         ),
+                        WoofModels.GroupedMessage grouped =>
+                            new OutgoingSegment<ForwardOutgoingSegmentData>(
+                                new(
+                                    grouped
+                                        .Pieces.Select(piece => new OutgoingForwardedMessage(
+                                            long.Parse(piece.UserId),
+                                            piece.Name,
+                                            piece.Messages.ToMilkySegments()
+                                        ))
+                                        .ToArray(),
+                                    grouped.Title,
+                                    grouped.Preview,
+                                    grouped.Summary,
+                                    grouped.Prompt
+                                )
+                            ),
                         _ => new OutgoingSegment<TextOutgoingSegmentData>(
                             new($"[Unsupported Message Segment: {segment.GetType().Name}]")
                         ),
