@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -332,6 +333,57 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         return string.Empty;
     }
 
+    private async Task<List<Messages>> ParseBilibiliOpusLink(string url, bool isLightApp)
+    {
+        if (!long.TryParse(url.Split('/').Last(), out long opusId))
+        {
+            return
+            [
+                [new Text("链接解析失败 ;-;")],
+            ];
+        }
+        string? opusImage = await GetImageAsync($"/bilibili/opus/info/image?opus_id={opusId}");
+        if (opusImage is null)
+        {
+            return
+            [
+                [new Text("链接解析失败 ;-;")],
+            ];
+        }
+        List<Messages> messages =
+        [
+            [new Image(opusImage)],
+        ];
+        var response = await _httpClient.GetAsync(
+            Config.RequestUrl.TrimEnd('/') + $"/bilibili/opus/images?opus_id={opusId}"
+        );
+        if (response.IsSuccessStatusCode)
+        {
+            OpusImageItem[]? items = await response.Content.ReadFromJsonAsync<OpusImageItem[]>(
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }
+            );
+            if (items is not null)
+            {
+                messages.Add([
+                    new GroupedMessage(
+                        "图文附件",
+                        ["哔哩哔哩图文", $"共 {items.Count()} 张图片"],
+                        "Made by WoofZJ",
+                        "[哔哩哔哩图文附件]",
+                        items
+                            .Select(item => new GroupedMessagePiece(
+                                Adapters[0].SelfId,
+                                Adapters[0].Name,
+                                [new Image(item.Url)]
+                            ))
+                            .ToList()
+                    ),
+                ]);
+            }
+        }
+        return messages;
+    }
+
     private async Task<List<Messages>> ParseBilibiliLiveLink(string url, bool isLightApp)
     {
         if (!int.TryParse(url.Split('/').Last(), out int liveId))
@@ -398,8 +450,13 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             {
                 return await ParseBilibiliLiveLink(realUrl, isLightApp);
             }
+            else if (realUrl.Contains("www.bilibili.com/opus"))
+            {
+                return await ParseBilibiliOpusLink(realUrl, isLightApp);
+            }
             else
             {
+                Console.WriteLine(realUrl);
                 var response = await _httpClient.GetAsync(
                     Config.RequestUrl.TrimEnd('/')
                         + $"/bilibili/video/info/short_url?short_url={Uri.EscapeDataString(url)}"
@@ -415,6 +472,10 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
         else if (url.Contains("live.bilibili.com"))
         {
             return await ParseBilibiliLiveLink(url, false);
+        }
+        else if (url.Contains("bilibili.com/opus"))
+        {
+            return await ParseBilibiliOpusLink(url, false);
         }
         else
         {

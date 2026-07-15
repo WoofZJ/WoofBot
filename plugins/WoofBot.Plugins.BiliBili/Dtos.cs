@@ -162,3 +162,5 @@ public record NeteaseCloudSongInfo(
     string Lyric,
     string Tlyric
 );
+
+public record OpusImageItem(string Url, int Width, int Height, double Size);
