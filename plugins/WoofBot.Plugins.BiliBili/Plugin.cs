@@ -362,7 +362,7 @@ public class BiliBiliPlugin : PluginBase<BiliBiliPluginConfig>
             OpusImageItem[]? items = await response.Content.ReadFromJsonAsync<OpusImageItem[]>(
                 new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }
             );
-            if (items is not null)
+            if (items is not null && items.Count() > 0)
             {
                 messages.Add([
                     new GroupedMessage(
