@@ -14,6 +14,7 @@ public record RocomPluginConfig
     public string ApiEndpoint { get; init; } = string.Empty;
     public List<string> EnabledGroups { get; init; } = [];
     public string ImageFolder { get; init; } = string.Empty;
+    public string Cron { get; init; } = "1 8,12,16,20 * * *";
 }
 
 public class RocomPlugin : PluginBase<RocomPluginConfig>
@@ -175,7 +176,7 @@ public class RocomPlugin : PluginBase<RocomPluginConfig>
         base.Subscribe(adapter);
         RegisterSchedule(
             "rocom-check",
-            "10 8,12,16,20 * * *",
+            Config.Cron,
             async (ct) =>
             {
                 if (Config.EnabledGroups.Count == 0)
